@@ -1,0 +1,10 @@
+*.pyc
+.vscode
+build
+test/meshfiles/*.msh
+test/meshfiles/*.h5
+*.egg-info
+*-venv
+*.vts
+*.log
+*.lprof

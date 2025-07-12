@@ -1,0 +1,19 @@
+[] Confirm correctness of the current implementation
+[] Change DOF logic to use PETSc Section and Fields (https://petsc.org/main/manual/section/) (NOT POSSIBLE NOWs)
+[] Use the fields to add the Boundary Conditions (https://petsc.org/release/manualpages/DM/DMAddBoundary) (NOT POSSIBLE NOWs)
+[] Change .ini aproach to support passing analytical solutions and boundary conditions
+[] Use hdf5 to cache the DMStag in the folder examples/example_tpfa/$CUR_EXAMPLE/cache
+[] Change test_tpfa to execute over all specified examples in the command
+[] Change well logic to use cartesian coordinates over the domain instead of grid
+[] Change test_tpfa logic to:
+    - Parse options to select the example, define logging configuration, define optimization configurations, define refinment of mesh and starting values
+    - Run the example
+    - Load the info for the example for each time step:
+        - Total times (preprocessing, solve, update)
+        - Total MPI messages
+        - Total allocated memory
+        - Values of pressure on each time step
+    - Use the pressure values to assert correctness and calculate the L2 error
+    - Plot graphs of time over each refinemnt, iteration speedup and other performance related metrics
+
+

@@ -1,0 +1,19 @@
+#!/bin/bash
+
+VENV_DIR="$( dirname -- "${BASH_SOURCE[0]}" )/.pytpfa-venv"
+
+if [ ! -d "$VENV_DIR" ]; then
+
+    if ! command -v python3 &> /dev/null; then
+        return 1 
+    fi
+
+    python3 -m venv "$VENV_DIR"
+
+    # Check if the creation was successful
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to create the virtual environment."
+        return 1
+    fi
+fi
+source "$VENV_DIR/bin/activate"

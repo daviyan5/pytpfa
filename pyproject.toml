@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pytpfa"
+version = "0.2.0"
+description = "Implementation using PETSc/PETSc4Py of the Two Point Flux Approximation Model with support to GPU nodes"
+authors = [
+    {name = "Davi Yan"}
+]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "mpi4py",
+    "sympy",
+    "pytest",
+    "petsc4py",
+    "meshio",
+    "h5py",
+    "pycuda",
+    "matplotlib",
+    "line_profiler"
+]
+
+[project.urls]
+Homepage = "https://github.com/daviyan5/pytpfa"
+
+[tool.setuptools.packages.find]
+where = ["."]
