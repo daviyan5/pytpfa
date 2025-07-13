@@ -1,16 +1,19 @@
 import configparser
+import os
 
 import numpy as np
 import sympy as sp
 
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Callable
+from petsc4py import PETSc
 
-from .analytical import analytical, dirichlet, neumann, source_term
+from .analytical import analytical, initial_condition, dirichlet, neumann, source_term
 
 
 @dataclass
 class ReservoirDescription:
+    name: str
     geom: str
     prop: str
     fluid: str
@@ -53,7 +56,7 @@ class Well:
 
 @dataclass
 class InitialCondition:
-    pressure: float
+    pressure: Callable = field(default_factory=lambda: lambda x, y, z: np.zeros_like(x))
 
 
 @dataclass
@@ -77,7 +80,7 @@ class ReservoirConfiguration:
     initial_condition: InitialCondition
     time_settings: TimeSettings
     boundaries: Dict[str, BoundaryCondition]
-    source_term: Callable = field(default_factory=lambda: lambda x, y, z, t: 0.0)
+    source_term: Callable = field(default_factory=lambda: lambda x, y, z, t: np.zeros_like(x))
     analytical_functions: Dict[str, Callable] = field(default_factory=dict)
 
 
@@ -94,7 +97,7 @@ class ReservoirINIParser:
         description = self._parse_description()
         reservoir_input = self._parse_input()
         wells = self._parse_wells()
-        initial_condition = self._parse_initial_condition()
+        initial_condition = self._parse_initial_condition(description.analytical)
         time_settings = self._parse_time_settings()
 
         params = self._create_params(reservoir_input, initial_condition)
@@ -139,6 +142,7 @@ class ReservoirINIParser:
     def _parse_description(self) -> ReservoirDescription:
         section = self.config["RESERVOIR_DESCRIPTION"]
         return ReservoirDescription(
+            name=section.get("NAME", "Reservoir"),
             geom=section.get("GEOM"),
             prop=section.get("PROP"),
             fluid=section.get("FLUID"),
@@ -186,9 +190,15 @@ class ReservoirINIParser:
                 wells[section_name] = well
         return wells
 
-    def _parse_initial_condition(self) -> InitialCondition:
+    def _parse_initial_condition(self, analytical) -> InitialCondition:
         section = self.config["INITIAL_CONDITION"]
-        return InitialCondition(pressure=section.getfloat("PRESSURE"))
+        pressure = None
+        if section.get("PRESSURE") == '"None"':
+            pressure = initial_condition(analytical)
+        else:
+            pressure_val = section.getfloat("PRESSURE", 0.0)
+            pressure = lambda x, y, z, v=pressure_val: np.full_like(x, v)
+        return InitialCondition(pressure=pressure)
 
     def _parse_time_settings(self) -> TimeSettings:
         section = self.config["TIME_SETTINGS"]
@@ -220,14 +230,14 @@ class ReservoirINIParser:
                 else:
                     value = section.getfloat("VALUE", 0.0)
                     if bc_type == "dirichlet":
-                        bc.func = lambda x, y, z, t, v=value: v
+                        bc.func = lambda x, y, z, t, v=value: np.full_like(x, v)
                     elif bc_type == "neumann":
-                        bc.func = lambda x, y, z, t, nx, ny, nz, v=value: v
+                        bc.func = lambda x, y, z, t, nx, ny, nz, v=value: np.full_like(x, v)
 
                 boundaries[name.lower()] = bc
             else:
                 boundaries[name.lower()] = BoundaryCondition(
-                    type="neumann", func=lambda x, y, z, t, nx, ny, nz: 1.0
+                    type="neumann", func=lambda x, y, z, t, nx, ny, nz: np.zeros_like(x)
                 )
         return boundaries
 
@@ -251,6 +261,8 @@ class ReservoirINIParser:
         return value
 
 
-def parse_reservoir_config(filepath: str) -> ReservoirConfiguration:
+def parse_reservoir_config(filepath: str, cache: bool = True) -> ReservoirConfiguration:
     parser = ReservoirINIParser(filepath)
-    return parser.parse()
+    reservoir_config = parser.parse()
+
+    return reservoir_config

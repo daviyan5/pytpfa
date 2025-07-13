@@ -12,6 +12,16 @@ def analytical(p_expr, params=None):
     return sp.lambdify((x, y, z, t), p_expr, "numpy")
 
 
+def initial_condition(p_expr, params=None):
+    """
+    Returns the analytical solution for the initial condition.
+    This is just the expression evaluated at t=0.
+    """
+    if isinstance(p_expr, str):
+        p_expr = sp.sympify(p_expr)
+    return sp.lambdify((x, y, z), p_expr.subs(t, 0), "numpy")
+
+
 def dirichlet(p_expr, params=None):
     """
     The Dirichlet condition is just the analytical solution itself, evaluated at the boundary.
@@ -41,7 +51,7 @@ def source_term(p_expr, params):
     Calculates the source term q by rearranging the PDE: q = Accumulation + Divergence_of_Flux
     This assumes a PDE of the form: ∂(φρ)/∂t - ∇·(ρk/μ ∇p) = q
     """
-    p_ref = params["p_ref"]
+    p_ref = p_expr.subs(t, 0)
     c_phi = params["porosity_compressibility"]
     c_rho = params["fluid_compressibility"]
     rho_ref = params["rho_ref"]

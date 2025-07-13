@@ -1,12 +1,13 @@
+import os
+import tempfile
+import meshio
+
 import numpy as np
 
 import sys, petsc4py
 
 petsc4py.init(sys.argv)
 from petsc4py import PETSc
-
-import os
-import meshio
 
 from functools import reduce
 
@@ -62,7 +63,16 @@ def mesh_to_dmstag(mesh_path, dofs=None):
     return dm
 
 
-def create_3d_dmstag(sizes=(2, 2, 2), h=(0.5, 0.5, 0.5), dofs=(1, 1, 1, 1)):
+def create_3d_dmstag(
+    sizes=(2, 2, 2), h=(0.5, 0.5, 0.5), dofs=(1, 1, 1, 1), name="Mesh", cache=True
+):
+    cache_folder = "pytpfa"
+    cache_path = os.path.join(tempfile.gettempdir(), cache_folder, f"{name}.h5")
+    # if cache and os.path.exists(cache_path):
+    #     viewer = PETSc.Viewer().createHDF5(cache_path, "r")
+    #     dm = PETSc.DMStag().load(viewer)
+    #     return dm
+
     nx, ny, nz = sizes
     hx, hy, hz = h
     dim = 3
@@ -83,4 +93,11 @@ def create_3d_dmstag(sizes=(2, 2, 2), h=(0.5, 0.5, 0.5), dofs=(1, 1, 1, 1)):
     dm.setCoordinateDMType(PETSc.DM.Type.STAG)
     dm.setUp()
     dm.setUniformCoordinatesExplicit(0, nx * hx, 0, ny * hy, 0, nz * hz)
+    dm.setName(name)
+
+    # if cache:
+    #     if not os.path.exists(os.path.dirname(cache_path)):
+    #         os.makedirs(os.path.dirname(cache_path))
+    #     viewer = PETSc.Viewer().createHDF5(cache_path, "w")
+    #     viewer.view(dm)
     return dm

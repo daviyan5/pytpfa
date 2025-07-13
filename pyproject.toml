@@ -19,6 +19,7 @@ dependencies = [
     "meshio",
     "h5py",
     "pycuda",
+    "dill",
     "matplotlib",
     "line_profiler"
 ]

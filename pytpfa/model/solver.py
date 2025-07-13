@@ -28,9 +28,24 @@ class TPFASolver:
     def __init__(self, name):
         self.name = name
 
+        self.out_info = {
+            "name": self.name,
+            "rank": 0,
+            "n_elements": 0,
+            "n_iterations": 0,
+            "l1_error": [],
+            "l2_error": [],
+            "linf_error": [],
+            "total_time": 0.0,
+            "preprocessing_time": 0.0,
+            "solving_time": 0.0,
+            "updating_time": 0.0,
+        }
+
     def solve(self, reservoir_path, postprocess=False):
         self.comm = PETSc.COMM_WORLD
         self.rank = PETSc.COMM_WORLD.getRank()
+        self.out_info["rank"] = self.rank
         self.b, self.x = None, None
         try:
             self.iteration = 0
@@ -53,12 +68,14 @@ class TPFASolver:
             preprocessing_end = time()
 
             self.preprocessing_time = preprocessing_end - preprocessing_start
+            self.out_info["preprocessing_time"] = self.preprocessing_time
             logger.info(
                 f"Preprocessing time: {self.preprocessing_time:.2f} seconds",
                 extra={"context": "Solver SOLVE"},
             )
 
             times = np.arange(self.TIME_INITIAL, self.TIME_FINAL + self.TIME_STEP, self.TIME_STEP)
+            self.out_info["n_iterations"] = len(times) - 1
             self.comm.barrier()
             for t_idx, (t_n, t_np1) in enumerate(zip(times[:-1], times[1:])):
 
@@ -80,7 +97,7 @@ class TPFASolver:
                 start_solve = time()
                 self.solve_system()
                 end_solve = time()
-
+                self.check(t_np1)
                 self.solving_time += end_solve - start_solve
 
                 iteration_time = end_solve - updating_start
@@ -95,6 +112,9 @@ class TPFASolver:
             end_time = time()
             self.simulation_time = end_time - starting_time
 
+            self.out_info["total_time"] = self.simulation_time
+            self.out_info["solving_time"] = self.solving_time
+            self.out_info["updating_time"] = self.updating_time
             logger.info(
                 f"Total solving time: {self.solving_time:.2f} seconds",
                 extra={"context": "Solver SOLVE"},
@@ -147,10 +167,12 @@ class TPFASolver:
         logger.info("Preprocessing problem data...", extra={"context": "Solver PREPROCESS"})
         self.dirname = os.path.dirname(reservoir_path)
 
-        config = parse_reservoir_config(reservoir_path)
+        config = parse_reservoir_config(reservoir_path, cache=True)
 
         reservoir_sizes = (config.input.nx, config.input.ny, config.input.nz)
         reservoir_h = (config.input.dx, config.input.dy, config.input.dz)
+
+        self.out_info["n_elements"] = np.prod(reservoir_sizes)
         self.hx, self.hy, self.hz = reservoir_h
 
         dof_count = self.dmstag_manager.get_dof_count()
@@ -158,7 +180,9 @@ class TPFASolver:
             f"Reservoir sizes: {reservoir_sizes}, h: {reservoir_h}, Dof count: {dof_count}",
             extra={"context": "Solver PREPROCESS"},
         )
-        self.dmstag = create_3d_dmstag(reservoir_sizes, reservoir_h, dof_count)
+        self.dmstag = create_3d_dmstag(
+            reservoir_sizes, reservoir_h, dof_count, name=config.description.name, cache=True
+        )
         self.dmstag_manager.set_dm(self.dmstag)
 
         K_xx = config.input.kx
@@ -184,7 +208,17 @@ class TPFASolver:
         self.TIME_FINAL = config.time_settings.time_final
         self.TIME_STEP = config.time_settings.time_step
 
-        self.INITIAL_PRESSURE = config.initial_condition.pressure
+        xe, ye, ze = self.dmstag_manager.get_coordinates(SL.ELEMENT).T
+        xeg, yeg, zeg = self.dmstag_manager.get_coordinates(SL.ELEMENT, use_ghost=True).T
+
+        self.INITIAL_PRESSURE = config.initial_condition.pressure(xe, ye, ze)
+        self.INITIAL_PRESSURE_GHOST = config.initial_condition.pressure(xeg, yeg, zeg)
+
+        if np.isscalar(self.INITIAL_PRESSURE):
+            self.INITIAL_PRESSURE = np.full_like(xe, self.INITIAL_PRESSURE)
+        if np.isscalar(self.INITIAL_PRESSURE_GHOST):
+            self.INITIAL_PRESSURE_GHOST = np.full_like(xeg, self.INITIAL_PRESSURE_GHOST)
+
         self.dmstag_manager.set_field("pressure", SL.ELEMENT, self.INITIAL_PRESSURE)
 
         self.WELLS = {}
@@ -264,6 +298,9 @@ class TPFASolver:
         }
 
         self.SOURCE_TERM = config.source_term
+        self.analytical_solution = (
+            config.analytical_functions["solution"] if config.analytical_functions else None
+        )
 
     def preprocess_mesh(self):
         """
@@ -682,9 +719,11 @@ class TPFASolver:
                 cur_internal_elem_pairs = self.internal_elem_pairs[face_stencil]
                 pressure_pairs = pressure[cur_internal_elem_pairs]
                 pressure_avg = np.mean(pressure_pairs, axis=1)
-
+                initial_pressure_pairs_avg = np.mean(
+                    self.INITIAL_PRESSURE_GHOST[cur_internal_elem_pairs], axis=1
+                )
                 B_pairs = self.B_REF_FORMATION_FACTOR / (
-                    1.0 + self.FLUID_COMPRESSIBILITY * (pressure_avg - self.INITIAL_PRESSURE)
+                    1.0 + self.FLUID_COMPRESSIBILITY * (pressure_avg - initial_pressure_pairs_avg)
                 )
                 fluid_transmissibility[cur_internal_faces_indices] = transmissibility[
                     cur_internal_faces_indices
@@ -693,8 +732,9 @@ class TPFASolver:
             if len(cur_boundary_faces_indices) > 0:
                 cur_boundary_elem_pairs = self.boundary_elem_pairs[face_stencil]
                 pressure_elem = pressure[cur_boundary_elem_pairs[:, 0]]
+                initial_pressure_elem = self.INITIAL_PRESSURE_GHOST[cur_boundary_elem_pairs[:, 0]]
                 B_elem = self.B_REF_FORMATION_FACTOR / (
-                    1.0 + self.FLUID_COMPRESSIBILITY * (pressure_elem - self.INITIAL_PRESSURE)
+                    1.0 + self.FLUID_COMPRESSIBILITY * (pressure_elem - initial_pressure_elem)
                 )
                 fluid_transmissibility[cur_boundary_faces_indices] = transmissibility[
                     cur_boundary_faces_indices
@@ -909,6 +949,63 @@ class TPFASolver:
                 f"Exported {name} vector to {dirname}/{name}_{index}.npy",
                 extra={"context": "Solver EXPORT"},
             )
+
+    import numpy as np
+
+    def check(self, time):
+        """
+        Check the solution against the analytical solution using standard error norms.
+        """
+        if not self.analytical_solution:
+            logger.debug(
+                "Problem does not have an analytical solution, skipping check.",
+                extra={"context": "Solver CHECK"},
+            )
+            return
+
+        element_centroid = self.dmstag_manager.get_coordinates(SL.ELEMENT)
+        pressure_sim = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
+
+        pressure_truth = self.analytical_solution(
+            element_centroid[:, 0],
+            element_centroid[:, 1],
+            element_centroid[:, 2],
+            time,
+        )
+
+        error_vector = pressure_sim - pressure_truth
+
+        norm_truth_l1 = np.linalg.norm(pressure_truth, ord=1)
+        norm_truth_l2 = np.linalg.norm(pressure_truth, ord=2)
+        norm_truth_linf = np.linalg.norm(pressure_truth, ord=np.inf)
+
+        if norm_truth_l2 == 0:
+            logger.warning(
+                "Analytical solution norm is zero, cannot compute relative error.",
+                extra={"context": "Solver CHECK"},
+            )
+            return
+
+        l1_error = np.linalg.norm(error_vector, ord=1) / norm_truth_l1
+        l2_error = np.linalg.norm(error_vector, ord=2) / norm_truth_l2
+        linf_error = np.linalg.norm(error_vector, ord=np.inf) / norm_truth_linf
+
+        log_message = f"L1={l1_error:.4e}, L2={l2_error:.4e}, L_inf={linf_error:.4e}"
+
+        if l2_error > 1e-3:
+            logger.warning(log_message, extra={"context": "Solver CHECK"})
+        else:
+            logger.info(log_message, extra={"context": "Solver CHECK"})
+
+        self.out_info["l1_error"].append(l1_error)
+        self.out_info["l2_error"].append(l2_error)
+        self.out_info["linf_error"].append(linf_error)
+
+    def get_info(self):
+        """
+        Return the solver information.
+        """
+        return out_info
 
     def postprocess(self, time):
         dirname = self.dirname + "/output"
