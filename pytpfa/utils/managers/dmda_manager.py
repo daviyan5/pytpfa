@@ -112,6 +112,8 @@ class DMDAManager:
                     raise ValueError(
                         f"Field '{name}' exceeds the total number of DOFs ({self.dof_count})."
                     )
+                for idx in range(size):
+                    self.dmda.setFieldName(self.used_dof + idx, f"{name}_{idx}")
                 self.used_dof += size
             field = Fields(name, index, dmda_name, size, is_shared, cell_info)
             self.fields[name] = field
@@ -468,7 +470,17 @@ class DMDAManager:
         Parameters:
             viewer: Viewer to use for displaying the DMDA
         """
+        logger.debug(
+            f"Viewing DMDA {self.dmda.getName()} with {len(self.fields)} fields",
+            extra={"context": f"DMDA {self.dmda_name}"},
+        )
+        for dof in range(self.used_dof):
+            logger.debug(
+                f"Field {dof}: {self.dmda.getFieldName(dof)}",
+                extra={"context": f"DMDA {self.dmda_name}"},
+            )
         self.dmda.view(viewer)
+        self.global_vec.view(viewer)
 
     def __repr__(self):
         """Return a string representation of the DMDAManager."""

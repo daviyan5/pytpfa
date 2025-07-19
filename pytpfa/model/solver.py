@@ -926,6 +926,11 @@ class TPFASolver:
         else:
             self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT, self.x)
 
+        # View A
+        viewer = PETSc.Viewer().createBinary(
+            f"{self.dirname}/output/A_{int(self.current_time * 1000):06d}.bin", "w", comm=self.comm
+        )
+        self.A.view(viewer)
         self.ksp.solve(self.b, self.x)
 
         # self.export_to_npy(self.b, f"b_{self.iteration}")
@@ -949,8 +954,6 @@ class TPFASolver:
                 f"Exported {name} vector to {dirname}/{name}_{index}.npy",
                 extra={"context": "Solver EXPORT"},
             )
-
-    import numpy as np
 
     def check(self, time):
         """
@@ -1016,8 +1019,10 @@ class TPFASolver:
             f"{dirname}/output_t{int(time * 1000):06d}.vts", "w", comm=self.comm
         )
         self.dmstag_manager.view_dmda(SL.ELEMENT, viewer)
-        self.x.view(viewer)
-        self.b.view(viewer)
+        logger.debug(
+            f"Postprocessing completed, output saved to {dirname}/output_t{int(time * 1000):06d}.vts",
+            extra={"context": "Solver POSTPROCESS"},
+        )
 
     def __repr__(self):
         """Return a string representation of the TPFASolver."""

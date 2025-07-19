@@ -76,7 +76,7 @@ def run_simulation(config):
                 extra={"context": "PROFILE"},
             )
 
-        simulation.solve(config["reservoir_path"], postprocess=False)
+        simulation.solve(config["reservoir_path"], postprocess=(not config["optimize_mode"]))
         main_logger.info("Simulation completed successfully", extra={"context": "MAIN"})
 
     except Exception as e:

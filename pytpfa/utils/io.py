@@ -108,7 +108,7 @@ class ReservoirINIParser:
             analytical_functions = self._create_analytical_functions(description.analytical, params)
 
         # At least one boundary must be dirichlet
-        if not any(bc.type == "dirichlet" for bc in boundaries.values()):
+        if not any(bc.type == "dirichlet" for bc in boundaries.values()) and not wells:
             raise ValueError("At least one boundary condition must be dirichlet.")
 
         return ReservoirConfiguration(

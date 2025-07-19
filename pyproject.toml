@@ -17,9 +17,8 @@ dependencies = [
     "pytest",
     "petsc4py",
     "meshio",
-    "h5py",
-    "pycuda",
-    "dill",
+    "pyvista",
+    "pandas",
     "matplotlib",
     "line_profiler"
 ]

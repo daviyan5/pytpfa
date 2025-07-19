@@ -127,8 +127,8 @@ def get_next_index(directory, prefix):
     return max(indices) + 1 if indices else 0
 
 
-def setup_logging(repository_path, optimize_mode=False):
-    """Configure logging for the simulation"""
+def setup_logging(repository_path, optimize_mode=False, log_prefix="simulation"):
+    """Configure logging for the simulation or other tools."""
     comm = PETSc.COMM_WORLD
     rank = comm.getRank()
 
@@ -139,8 +139,8 @@ def setup_logging(repository_path, optimize_mode=False):
     rank_dir = os.path.join(log_dir, f"rank_{rank}")
     Path(rank_dir).mkdir(exist_ok=True)
 
-    index = get_next_index(rank_dir, "simulation")
-    log_file = os.path.join(rank_dir, f"simulation_{index}.log")
+    index = get_next_index(rank_dir, log_prefix)
+    log_file = os.path.join(rank_dir, f"{log_prefix}_{index}.log")
 
     log_format = "[%(asctime)s] %(fileinfo)s [Rank: %(rank)-4s] [%(context)-34s] [%(levelname)-5s] %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
@@ -151,7 +151,9 @@ def setup_logging(repository_path, optimize_mode=False):
 
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
+
     console_formatter = ColoredConsoleFormatter(log_format, date_format)
+
     console_handler.setFormatter(console_formatter)
 
     rank_filter = RankFilter()

@@ -8,3 +8,6 @@ test/meshfiles/*.h5
 *.vts
 *.log
 *.lprof
+*.bin
+*.info
+*.pkl
