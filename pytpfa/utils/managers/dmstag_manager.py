@@ -324,7 +324,8 @@ class DMStagManager:
 
         connectivity_tuples = src_tuples[:, np.newaxis, :] + offsets_3d[np.newaxis, :, :]
 
-        connectivity_tuples -= np.array(tgt_dmda_manager.ghost_corners)  # Adjust for ghost cells
+        # Adjust for ghost cells
+        connectivity_tuples -= np.array(tgt_dmda_manager.ghost_corners)
         tgt_ghost_sizes = tgt_dmda_manager.ghost_sizes
 
         logger.debug(

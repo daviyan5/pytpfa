@@ -20,7 +20,8 @@ dependencies = [
     "pyvista",
     "pandas",
     "matplotlib",
-    "line_profiler"
+    "line_profiler",
+    "tabulate"
 ]
 
 [project.urls]
@@ -28,3 +29,9 @@ Homepage = "https://github.com/daviyan5/pytpfa"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.autopep8]
+max_line_length = 99
+aggressive = 2
+experimental = true 
+ignore = ["E501", "W503"]

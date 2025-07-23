@@ -3,7 +3,8 @@ import os
 import logging
 import numpy as np
 
-import sys, petsc4py
+import sys
+import petsc4py
 
 from petsc4py import PETSc
 from time import time, sleep
@@ -42,7 +43,11 @@ class TPFASolver:
             "updating_time": 0.0,
         }
 
-    def solve(self, reservoir_path, postprocess=False):
+        # For boundary conditions
+        self.matching_indices = {}
+
+    def solve(self, reservoir_path, checks=True, postprocess=False):
+        self.do_checks = checks
         self.comm = PETSc.COMM_WORLD
         self.rank = PETSc.COMM_WORLD.getRank()
         self.out_info["rank"] = self.rank
@@ -97,7 +102,10 @@ class TPFASolver:
                 start_solve = time()
                 self.solve_system()
                 end_solve = time()
-                self.check(t_np1)
+
+                if self.do_checks:
+                    self.check(t_np1)
+
                 self.solving_time += end_solve - start_solve
 
                 iteration_time = end_solve - updating_start
@@ -144,7 +152,7 @@ class TPFASolver:
         # Element fields
         self.dmstag_manager.add_field("pressure", 1, 3, is_shared=True)
         self.dmstag_manager.add_field("volume", 1, 3)
-        self.dmstag_manager.add_field("permeability", 9, 3, is_shared=True)  # K
+        self.dmstag_manager.add_field("permeability", 3, 3, is_shared=True)  # K
         self.dmstag_manager.add_field("porosity", 1, 3)  # φ
         self.dmstag_manager.add_field("formation_factor", 1, 3)  # B
         self.dmstag_manager.add_field("accumulation_coefficient", 1, 3)  # Gamma
@@ -153,6 +161,7 @@ class TPFASolver:
         self.dmstag_manager.add_field(
             "elem_transmissibility", 1, 3, is_shared=True
         )  # Transmissibility for the element
+        self.dmstag_manager.add_field("clf", 1, 3, is_shared=True)
 
         # Faces fields
         self.dmstag_manager.add_field("area", 1, 2)
@@ -189,8 +198,8 @@ class TPFASolver:
         K_yy = config.input.ky
         K_zz = config.input.kz
 
-        K = np.zeros((self.dmstag_manager.get_count(SL.ELEMENT), 9))
-        K[:] = [K_xx, 0.0, 0.0, 0.0, K_yy, 0.0, 0.0, 0.0, K_zz]
+        K = np.zeros((self.dmstag_manager.get_count(SL.ELEMENT), 3))
+        K[:] = [K_xx, K_yy, K_zz]
         self.dmstag_manager.set_field("permeability", SL.ELEMENT, K)
 
         self.ALPHA_C = 5.615
@@ -252,6 +261,7 @@ class TPFASolver:
                 raise ValueError(f"Unrecognized well condition: {well.cond} for well {well_name}")
 
             self.WELLS[well_name] = {
+                "name": well_name,
                 "index": well_index,
                 "permeability": well.permeability,
                 "height": well.h,
@@ -270,31 +280,35 @@ class TPFASolver:
                 extra={"context": "Solver PREPROCESS"},
             )
 
+        local_nx, local_ny, local_nz = self.dmstag_manager.get_sizes(SL.ELEMENT)
+        start_ix, start_iy, start_iz = self.dmstag_manager.get_corners(SL.ELEMENT)
+
+        self.well_indices = []
+        for well_name, well in self.WELLS.items():
+            i, j, k = well["index"]
+
+            # Check if the well is within the local domain of this process
+            if (
+                (start_ix <= i < start_ix + local_nx)
+                and (start_iy <= j < start_iy + local_ny)
+                and (start_iz <= k < start_iz + local_nz)
+            ):
+                logger.debug(
+                    f"Adding well source term for well {well_name} at index ({i}, {j}, {k})",
+                    extra={"context": f"Solver PREPROCESS"},
+                )
+                local_i, local_j, local_k = i - start_ix, j - start_iy, k - start_iz
+                local_idx = local_i + local_j * local_nx + local_k * local_nx * local_ny
+
+                self.well_indices.append((local_idx, well))
+
         self.BOUNDARY = {
-            BD.LEFT: (
-                config.boundaries["left"].type,
-                config.boundaries["left"].func,
-            ),
-            BD.DOWN: (
-                config.boundaries["down"].type,
-                config.boundaries["down"].func,
-            ),
-            BD.BACK: (
-                config.boundaries["back"].type,
-                config.boundaries["back"].func,
-            ),
-            BD.RIGHT: (
-                config.boundaries["right"].type,
-                config.boundaries["right"].func,
-            ),
-            BD.UP: (
-                config.boundaries["up"].type,
-                config.boundaries["up"].func,
-            ),
-            BD.FRONT: (
-                config.boundaries["front"].type,
-                config.boundaries["front"].func,
-            ),
+            BD.LEFT: (config.boundaries["left"].type, config.boundaries["left"].func, -1),
+            BD.DOWN: (config.boundaries["down"].type, config.boundaries["down"].func, -1),
+            BD.BACK: (config.boundaries["back"].type, config.boundaries["back"].func, -1),
+            BD.RIGHT: (config.boundaries["right"].type, config.boundaries["right"].func, 1),
+            BD.UP: (config.boundaries["up"].type, config.boundaries["up"].func, 1),
+            BD.FRONT: (config.boundaries["front"].type, config.boundaries["front"].func, 1),
         }
 
         self.SOURCE_TERM = config.source_term
@@ -324,29 +338,27 @@ class TPFASolver:
             face_count = self.dmstag_manager.get_count(face_stencil)
             face_global_count = self.dmstag_manager.get_count(face_stencil, is_global=True)
 
-            centroids = np.mean(point_coords_by_face, axis=1)
-
             # Sanity check
-            face_centroid = self.dmstag_manager.get_coordinates(face_stencil)
+            if self.do_checks:
+                centroids = np.mean(point_coords_by_face, axis=1)
+                face_centroid = self.dmstag_manager.get_coordinates(face_stencil)
 
-            # Centroid MUST match face_centroid
-            if not np.allclose(centroids, face_centroid, atol=1e-6):
-                logger.error(
-                    f"Centroid mismatch for face {STENCIL_NAME[face_stencil]}: "
-                    f"Calculated {centroids}, Expected {face_centroid}",
-                    extra={"context": "Solver PREPROCESS"},
-                )
-                raise ValueError("Centroid mismatch for face")
+                # Centroid MUST match face_centroid
+                if not np.allclose(centroids, face_centroid, atol=1e-6):
+                    logger.error(
+                        f"Centroid mismatch for face {STENCIL_NAME[face_stencil]}: "
+                        f"Calculated {centroids}, Expected {face_centroid}",
+                        extra={"context": "Solver PREPROCESS"},
+                    )
+                    raise ValueError("Centroid mismatch for face")
 
             v1 = point_coords_by_face[:, 1] - point_coords_by_face[:, 0]
             v2 = point_coords_by_face[:, 3] - point_coords_by_face[:, 0]
 
-            cross_product = np.zeros((len(area), 3))
-            cross_product[:, 0] = v1[:, 1] * v2[:, 2] - v1[:, 2] * v2[:, 1]
-            cross_product[:, 1] = v1[:, 2] * v2[:, 0] - v1[:, 0] * v2[:, 2]
-            cross_product[:, 2] = v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0]
+            cross_product = np.cross(v1, v2)
 
-            area = np.linalg.norm(cross_product, axis=1)  # 2 Equal Triangles, so 2 * 0.5 = 1
+            # 2 Equal Triangles, so 2 * 0.5 = 1
+            area = np.linalg.norm(cross_product, axis=1)
             normal_vector = cross_product / area[:, np.newaxis]
             self.dmstag_manager.set_field("area", face_stencil, area)
             self.dmstag_manager.set_field("normal_vector", face_stencil, normal_vector)
@@ -367,19 +379,19 @@ class TPFASolver:
 
         point_coords_by_element = point_coordinates[element_connectivity]
 
-        centroid = np.mean(point_coords_by_element, axis=1)
-
         # Sanity check
-        element_centroid = self.dmstag_manager.get_coordinates(SL.ELEMENT)
+        if self.do_checks:
+            centroid = np.mean(point_coords_by_element, axis=1)
+            element_centroid = self.dmstag_manager.get_coordinates(SL.ELEMENT)
 
-        # Centroid MUST match element_centroid
-        if not np.allclose(centroid, element_centroid, atol=1e-6):
-            logger.error(
-                f"Centroid mismatch for element: "
-                f"Calculated {centroid}, Expected {element_centroid}",
-                extra={"context": "Solver PREPROCESS"},
-            )
-            raise ValueError("Centroid mismatch for element")
+            # Centroid MUST match element_centroid
+            if not np.allclose(centroid, element_centroid, atol=1e-6):
+                logger.error(
+                    f"Centroid mismatch for element: "
+                    f"Calculated {centroid}, Expected {element_centroid}",
+                    extra={"context": "Solver PREPROCESS"},
+                )
+                raise ValueError("Centroid mismatch for element")
 
         v1 = point_coords_by_element[:, 1] - point_coords_by_element[:, 0]
         v2 = point_coords_by_element[:, 3] - point_coords_by_element[:, 0]
@@ -387,14 +399,8 @@ class TPFASolver:
 
         # Calculate volume using scalar triple product for hexahedron
         # Volume = |v1 · (v2 × v3)| for tetrahedron, sum for hexahedron
-        cross_product = np.zeros((len(volume), 3))
-        cross_product[:, 0] = v2[:, 1] * v3[:, 2] - v2[:, 2] * v3[:, 1]
-        cross_product[:, 1] = v2[:, 2] * v3[:, 0] - v2[:, 0] * v3[:, 2]
-        cross_product[:, 2] = v2[:, 0] * v3[:, 1] - v2[:, 1] * v3[:, 0]
+        volume = np.abs(np.sum(v1 * np.cross(v2, v3), axis=1))
 
-        dot_product = np.sum(v1 * cross_product, axis=1)
-
-        volume = np.abs(dot_product)
         self.dmstag_manager.set_field("volume", SL.ELEMENT, volume)
         logger.debug(
             f"Average volume for elements: {np.mean(volume)}",
@@ -464,122 +470,80 @@ class TPFASolver:
             )[0]
 
             logger.debug(
-                f"Number of internal faces: " f"{len(self.internal_faces_indices[face_stencil])}",
+                f"Number of internal faces: {len(self.internal_faces_indices[face_stencil])}",
                 extra={"context": f"Solver ASSEMBLE {STENCIL_NAME[face_stencil]}"},
             )
             logger.debug(
-                f"Number of boundary faces: " f"{len(self.boundary_faces_indices[face_stencil])}",
+                f"Number of boundary faces: {len(self.boundary_faces_indices[face_stencil])}",
                 extra={"context": f"Solver ASSEMBLE {STENCIL_NAME[face_stencil]}"},
             )
 
             faces_trans = np.zeros(self.dmstag_manager.get_count(face_stencil))
 
-            cur_internal_faces_indices = self.internal_faces_indices[face_stencil]
-            cur_boundary_faces_indices = self.boundary_faces_indices[face_stencil]
+            # Process both internal and boundary faces
+            for is_internal, face_indices in [
+                (True, self.internal_faces_indices[face_stencil]),
+                (False, self.boundary_faces_indices[face_stencil]),
+            ]:
+                if len(face_indices) == 0:
+                    continue
 
-            if len(cur_internal_faces_indices) > 0:
-                self.internal_elem_pairs[face_stencil] = elem_pairs[cur_internal_faces_indices]
-                cur_internal_elem_pairs = self.internal_elem_pairs[face_stencil]
+                # Store elem pairs
+                if is_internal:
+                    self.internal_elem_pairs[face_stencil] = elem_pairs[face_indices]
+                    elem_pairs_subset = self.internal_elem_pairs[face_stencil]
+                else:
+                    self.boundary_elem_pairs[face_stencil] = elem_pairs[face_indices]
+                    elem_pairs_subset = self.boundary_elem_pairs[face_stencil]
 
-                internal_faces_area = face_area[cur_internal_faces_indices]
-                internal_faces_normal = normal_vector[cur_internal_faces_indices]
-                internal_faces_centroids = face_centroid[cur_internal_faces_indices]
+                # Common extractions
+                faces_area = face_area[face_indices]
+                faces_normal = normal_vector[face_indices]
+                faces_centroids = face_centroid[face_indices]
 
-                K_pairs = permeability[cur_internal_elem_pairs]
-                internal_elem_pairs_centroids = elem_centroids[cur_internal_elem_pairs]
+                if is_internal:
+                    # Internal faces: harmonic mean between two cells
+                    K_pairs = permeability[elem_pairs_subset]
+                    elem_centroids_pairs = elem_centroids[elem_pairs_subset]
 
-                # Distance vectors from cell centers to face center
-                h_L = internal_faces_centroids - internal_elem_pairs_centroids[:, 0]
-                h_R = internal_elem_pairs_centroids[:, 1] - internal_faces_centroids
+                    h_L = np.linalg.norm(faces_centroids - elem_centroids_pairs[:, 0], axis=1)
+                    h_R = np.linalg.norm(elem_centroids_pairs[:, 1] - faces_centroids, axis=1)
 
-                h_L = np.linalg.norm(h_L, axis=1)
-                h_R = np.linalg.norm(h_R, axis=1)
+                    # Sanity check
+                    if self.do_checks and not np.allclose(h_L, h_R, atol=1e-6):
+                        logger.error(f"Distance vectors h_L and h_R are not equal")
+                        raise ValueError("Distance vectors h_L and h_R are not equal")
 
-                # Sanity check, they must be all equal between thenselves and between left and right
-                if (
-                    not np.allclose(h_L, h_R, atol=1e-6)
-                    or not np.allclose(h_L, h_L[0], atol=1e-6)
-                    or not np.allclose(h_R, h_R[0], atol=1e-6)
-                ):
-                    logger.error(
-                        f"Distance vectors h_L and h_R are not equal: " f"h_L: {h_L}, h_R: {h_R}",
-                        extra={"context": f"Solver ASSEMBLE {STENCIL_NAME[face_stencil]}"},
-                    )
-                    raise ValueError("Distance vectors h_L and h_R are not equal")
+                    KnL = np.sum(K_pairs[:, 0] * (faces_normal**2), axis=1)
+                    KnR = np.sum(K_pairs[:, 1] * (faces_normal**2), axis=1)
 
-                # Extract permeability tensors
-                KL = K_pairs[:, 0].reshape((len(cur_internal_elem_pairs), 3, 3))
-                KR = K_pairs[:, 1].reshape((len(cur_internal_elem_pairs), 3, 3))
+                    Keq = (KnL * KnR) / ((KnL * h_R) + (KnR * h_L))
+                    faces_trans[face_indices] = Keq * faces_area
 
-                # Compute normal permeabilities: K_n = n^T · K · n
-                KnL = np.einsum(
-                    "ij,ij->i",
-                    internal_faces_normal,
-                    np.einsum("ij,ikj->ik", internal_faces_normal, KL),
-                )
-                KnR = np.einsum(
-                    "ij,ij->i",
-                    internal_faces_normal,
-                    np.einsum("ij,ikj->ik", internal_faces_normal, KR),
-                )
+                else:
+                    # Boundary faces: single cell
+                    K = permeability[elem_pairs_subset[:, 0]]
+                    elem_centroids_single = elem_centroids[elem_pairs_subset[:, 0]]
 
-                # Harmonic mean for equivalent permeability
-                Keq = (KnL * KnR) / ((KnL * h_R) + (KnR * h_L))
-                faces_trans[cur_internal_faces_indices] = Keq * internal_faces_area
+                    h = np.linalg.norm(faces_centroids - elem_centroids_single, axis=1)
+
+                    # Sanity check
+                    if self.do_checks:
+                        expected_h = {
+                            SL.LEFT: self.hx / 2,
+                            SL.BACK: self.hz / 2,
+                            SL.DOWN: self.hy / 2,
+                        }
+                        if not np.isclose(h[0], expected_h[face_stencil], atol=1e-6):
+                            logger.error(f"Distance vector h is not equal to expected value")
+                            raise ValueError("Distance vector h is not equal to expected value")
+
+                    Kn = np.sum(K * (faces_normal**2), axis=1)
+                    faces_trans[face_indices] = (Kn * faces_area) / h
+
                 logger.debug(
-                    f"Average transmissibility for internal faces: "
-                    f"{np.mean(faces_trans[cur_internal_faces_indices])}",
-                    extra={"context": f"Solver ASSEMBLE {STENCIL_NAME[face_stencil]}"},
-                )
-
-            if len(cur_boundary_faces_indices) > 0:
-                self.boundary_elem_pairs[face_stencil] = elem_pairs[cur_boundary_faces_indices]
-                cur_boundary_elem_pairs = self.boundary_elem_pairs[face_stencil]
-
-                boundary_faces_area = face_area[cur_boundary_faces_indices]
-                boundary_faces_normal = normal_vector[cur_boundary_faces_indices]
-                boundary_faces_centroids = face_centroid[cur_boundary_faces_indices]
-
-                K = permeability[cur_boundary_elem_pairs[:, 0]]
-
-                boundary_elem_pairs_centroids = elem_centroids[cur_boundary_elem_pairs[:, 0]]
-
-                # Distance vectors from cell centers to face center
-                h = boundary_faces_centroids - boundary_elem_pairs_centroids
-                h = np.linalg.norm(h, axis=1)
-
-                # Sanity check, they must all be equal and if face_stencil is LEFT, they must be equal to hx
-                if not np.allclose(h, h[0], atol=1e-6):
-                    logger.error(
-                        f"Distance vector h is not equal: {h}",
-                        extra={"context": f"Solver ASSEMBLE {STENCIL_NAME[face_stencil]}"},
-                    )
-                    raise ValueError("Distance vector h is not equal")
-
-                h_to_face_stencil = {
-                    SL.LEFT: self.hx / 2,
-                    SL.BACK: self.hz / 2,
-                    SL.DOWN: self.hy / 2,
-                }
-                if not np.isclose(h[0], h_to_face_stencil[face_stencil], atol=1e-6):
-                    logger.error(
-                        f"Distance vector h is not equal to expected value: {h[0]} != "
-                        f"{h_to_face_stencil[face_stencil]}",
-                        extra={"context": f"Solver ASSEMBLE {STENCIL_NAME[face_stencil]}"},
-                    )
-                    raise ValueError("Distance vector h is not equal to expected value")
-
-                # Extract permeability tensors
-                K = K.reshape((len(cur_boundary_elem_pairs), 3, 3))
-                Kn = np.einsum(
-                    "ij,ij->i",
-                    boundary_faces_normal,
-                    np.einsum("ij,ikj->ik", boundary_faces_normal, K),
-                )
-                faces_trans[cur_boundary_faces_indices] = (Kn * boundary_faces_area) / h
-                logger.debug(
-                    f"Average transmissibility for boundary faces: "
-                    f"{np.mean(faces_trans[cur_boundary_faces_indices])}",
+                    f"Average transmissibility for {'internal' if is_internal else 'boundary'} faces: "
+                    f"{np.mean(faces_trans[face_indices])}",
                     extra={"context": f"Solver ASSEMBLE {STENCIL_NAME[face_stencil]}"},
                 )
 
@@ -686,7 +650,7 @@ class TPFASolver:
         )
         self.dmstag_manager.set_field("formation_factor", SL.ELEMENT, B_array)
 
-        phi_array = self.POROSITY_REF / (
+        phi_array = self.POROSITY_REF * (
             1.0 + self.PORE_COMPRESSIBILITY * (pressure - self.INITIAL_PRESSURE)
         )
         self.dmstag_manager.set_field("porosity", SL.ELEMENT, phi_array)
@@ -712,36 +676,38 @@ class TPFASolver:
             transmissibility = self.dmstag_manager.get_field("transmissibility", face_stencil)
             fluid_transmissibility = np.zeros_like(transmissibility)
 
-            cur_internal_faces_indices = self.internal_faces_indices[face_stencil]
-            cur_boundary_faces_indices = self.boundary_faces_indices[face_stencil]
+            st_internal_faces_indices = self.internal_faces_indices[face_stencil]
+            st_boundary_faces_indices = self.boundary_faces_indices[face_stencil]
 
-            if len(cur_internal_faces_indices) > 0:
-                cur_internal_elem_pairs = self.internal_elem_pairs[face_stencil]
-                pressure_pairs = pressure[cur_internal_elem_pairs]
-                pressure_avg = np.mean(pressure_pairs, axis=1)
-                initial_pressure_pairs_avg = np.mean(
-                    self.INITIAL_PRESSURE_GHOST[cur_internal_elem_pairs], axis=1
-                )
-                B_pairs = self.B_REF_FORMATION_FACTOR / (
-                    1.0 + self.FLUID_COMPRESSIBILITY * (pressure_avg - initial_pressure_pairs_avg)
-                )
-                fluid_transmissibility[cur_internal_faces_indices] = transmissibility[
-                    cur_internal_faces_indices
-                ] / (B_pairs * self.VISCOSITY)
+            # Process both internal and boundary faces
+            for is_internal, face_indices, elem_pairs in [
+                (True, st_internal_faces_indices, self.internal_elem_pairs.get(face_stencil, [])),
+                (False, st_boundary_faces_indices, self.boundary_elem_pairs.get(face_stencil, [])),
+            ]:
+                if len(face_indices) == 0:
+                    continue
 
-            if len(cur_boundary_faces_indices) > 0:
-                cur_boundary_elem_pairs = self.boundary_elem_pairs[face_stencil]
-                pressure_elem = pressure[cur_boundary_elem_pairs[:, 0]]
-                initial_pressure_elem = self.INITIAL_PRESSURE_GHOST[cur_boundary_elem_pairs[:, 0]]
-                B_elem = self.B_REF_FORMATION_FACTOR / (
-                    1.0 + self.FLUID_COMPRESSIBILITY * (pressure_elem - initial_pressure_elem)
+                if is_internal:
+                    # Internal: use average pressure between two cells
+                    pressure_vals = np.mean(pressure[elem_pairs], axis=1)
+                    initial_pressure_vals = np.mean(self.INITIAL_PRESSURE_GHOST[elem_pairs], axis=1)
+                else:
+                    # Boundary: use single cell pressure
+                    pressure_vals = pressure[elem_pairs[:, 0]]
+                    initial_pressure_vals = self.INITIAL_PRESSURE_GHOST[elem_pairs[:, 0]]
+
+                # Common B calculation
+                B_vals = self.B_REF_FORMATION_FACTOR / (
+                    1.0 + self.FLUID_COMPRESSIBILITY * (pressure_vals - initial_pressure_vals)
                 )
-                fluid_transmissibility[cur_boundary_faces_indices] = transmissibility[
-                    cur_boundary_faces_indices
-                ] / (B_elem * self.VISCOSITY)
+
+                # Update fluid transmissibility
+                fluid_transmissibility[face_indices] = transmissibility[face_indices] / (
+                    B_vals * self.VISCOSITY
+                )
 
             logger.debug(
-                f"Average fluid transmissibility: " f"{np.mean(fluid_transmissibility)}",
+                f"Average fluid transmissibility: {np.mean(fluid_transmissibility)}",
                 extra={"context": f"Solver UPDATE {STENCIL_NAME[face_stencil]} [{self.iteration}]"},
             )
             self.dmstag_manager.set_field(
@@ -769,29 +735,31 @@ class TPFASolver:
 
             boundary_directions = self.boundary[face_stencil]
 
-            cur_boundary_faces_indices = self.boundary_faces_indices[face_stencil]
-            if len(cur_boundary_faces_indices) == 0:
+            st_boundary_faces_indices = self.boundary_faces_indices[face_stencil]
+            if len(st_boundary_faces_indices) == 0:
                 continue
 
-            cur_boundary_elem_pairs = self.boundary_elem_pairs[face_stencil]
-            b_trans = fluid_transmissibility[cur_boundary_faces_indices]
-            b_area = face_area[cur_boundary_faces_indices]
-            b_dirs = boundary_directions[cur_boundary_faces_indices]
-            b_elems = cur_boundary_elem_pairs[:, 0]
+            st_boundary_elem_pairs = self.boundary_elem_pairs[face_stencil]
+            b_trans = fluid_transmissibility[st_boundary_faces_indices]
+            b_area = face_area[st_boundary_faces_indices]
+            b_dirs = boundary_directions[st_boundary_faces_indices]
+            b_elems = st_boundary_elem_pairs[:, 0]
 
-            for direction_enum, (bc_type, bc_func) in self.BOUNDARY.items():
-                matching_indices = np.where(b_dirs == direction_enum.value)[0]
-                logger.debug(
-                    f"Boundary conditions with type {bc_type}: {len(matching_indices)}",
-                    extra={
-                        "context": f"Solver BOUNDARY {STENCIL_NAME[face_stencil]} [{self.iteration}]"
-                    },
-                )
+            if face_stencil not in self.matching_indices:
+                self.matching_indices[face_stencil] = {}
+
+            for direction_enum, (bc_type, bc_func, bc_mult) in self.BOUNDARY.items():
+                if direction_enum not in self.matching_indices[face_stencil]:
+                    self.matching_indices[face_stencil][direction_enum] = np.where(
+                        b_dirs == direction_enum.value
+                    )[0]
+                matching_indices = self.matching_indices[face_stencil][direction_enum]
+
                 if len(matching_indices) == 0:
                     continue
 
                 elements_to_update = b_elems[matching_indices]
-                xf, yf, zf = face_centroid[cur_boundary_faces_indices[matching_indices]].T
+                xf, yf, zf = face_centroid[st_boundary_faces_indices[matching_indices]].T
 
                 if bc_type == "dirichlet":
                     bc_values = bc_func(xf, yf, zf, self.current_time)
@@ -800,47 +768,29 @@ class TPFASolver:
                     np.add.at(S_u, elements_to_update, source_contribution)
 
                 elif bc_type == "neumann":
-                    # Neumann boundary condition: normal derivative of pressure
-                    nx, ny, nz = normal_vector[cur_boundary_faces_indices[matching_indices]].T
-                    bc_values = bc_func(xf, yf, zf, self.current_time, nx, ny, nz)
+                    nx, ny, nz = normal_vector[st_boundary_faces_indices[matching_indices]].T
+                    bc_values = bc_func(xf, yf, zf, self.current_time, nx, ny, nz) * bc_mult
+                    trans_neu = b_trans[matching_indices]
                     area_neu = b_area[matching_indices]
-                    source_contribution = area_neu * bc_values
+                    source_contribution = area_neu * trans_neu * bc_values
                     np.add.at(S_u, elements_to_update, source_contribution)
 
-                    neu_face_indices = cur_boundary_faces_indices[matching_indices]
-                    fluid_transmissibility[neu_face_indices] = 0.0
-
-            self.dmstag_manager.set_field(
-                "fluid_transmissibility", face_stencil, fluid_transmissibility
-            )
-
-        local_nx, local_ny, local_nz = self.dmstag_manager.get_sizes(SL.ELEMENT)
-        start_ix, start_iy, start_iz = self.dmstag_manager.get_corners(SL.ELEMENT)
-
-        ghost_nx, ghost_ny, ghost_nz = self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)
-
-        for well_name, well in self.WELLS.items():
-            i, j, k = well["index"]
-
-            # Check if the well is within the local domain of this process
-            if (
-                (start_ix <= i < start_ix + local_nx)
-                and (start_iy <= j < start_iy + local_ny)
-                and (start_iz <= k < start_iz + local_nz)
-            ):
-                logger.debug(
-                    f"Adding well source term for well {well_name} at index ({i}, {j}, {k})",
-                    extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
-                )
-                local_i, local_j, local_k = i - start_ix, j - start_iy, k - start_iz
-
-                ghost_i, ghost_j, ghost_k = local_i + 1, local_j + 1, local_k + 1
-                ghost_idx = ghost_i + ghost_nx * ghost_j + ghost_nx * ghost_ny * ghost_k
-
-                # Add well source term: q_l_sc + J * p_wf
-                S_u[ghost_idx] += well["rate"] + well["J"] * well["pressure"]
-
+        self.dmstag_manager.set_field("external_source", SL.ELEMENT, 0)
         self.dmstag_manager.set_field("external_source", SL.ELEMENT, S_u, use_ghost=True)
+
+        if len(self.WELLS) == 0:
+            return
+
+        S_u_local = self.dmstag_manager.get_field("external_source", SL.ELEMENT)
+
+        for local_idx, well in self.well_indices:
+            logger.debug(
+                f"Adding well source term for well {well["name"]} at index ({well["index"]})",
+                extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
+            )
+            S_u_local[local_idx] = well["rate"] + well["J"] * well["pressure"]
+
+        self.dmstag_manager.set_field("external_source", SL.ELEMENT, S_u_local)
 
     def assemble_system(self):
         """
@@ -862,35 +812,79 @@ class TPFASolver:
         self.dmstag_manager.set_field("rhs", SL.ELEMENT, b)
 
         Tp = np.zeros(self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)).flatten()
+        clf = np.zeros(self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)).flatten()
 
         for face_stencil in [SL.LEFT, SL.BACK, SL.DOWN]:
             faces_transmissibility = self.dmstag_manager.get_field(
                 "fluid_transmissibility", face_stencil
             )
-            cur_internal_faces_indices = self.internal_faces_indices[face_stencil]
-            cur_boundary_faces_indices = self.boundary_faces_indices[face_stencil]
+            st_internal_faces_indices = self.internal_faces_indices[face_stencil]
+            st_boundary_faces_indices = self.boundary_faces_indices[face_stencil]
 
-            if len(cur_internal_faces_indices) > 0:
-                cur_internal_elem_pairs = self.internal_elem_pairs[face_stencil]
+            if len(st_internal_faces_indices) > 0:
+                st_internal_elem_pairs = self.internal_elem_pairs[face_stencil]
+                in_trans = faces_transmissibility[st_internal_faces_indices]
+                L_pairs = st_internal_elem_pairs[:, 0]
+                R_pairs = st_internal_elem_pairs[:, 1]
                 np.add.at(
                     Tp,
-                    cur_internal_elem_pairs[:, 0],
-                    faces_transmissibility[cur_internal_faces_indices],
+                    L_pairs,
+                    in_trans,
+                )
+                np.add.at(
+                    clf,
+                    L_pairs,
+                    in_trans,
                 )
                 np.add.at(
                     Tp,
-                    cur_internal_elem_pairs[:, 1],
-                    faces_transmissibility[cur_internal_faces_indices],
+                    R_pairs,
+                    in_trans,
                 )
-            if len(cur_boundary_faces_indices) > 0:
-                cur_boundary_elem_pairs = self.boundary_elem_pairs[face_stencil]
                 np.add.at(
-                    Tp,
-                    cur_boundary_elem_pairs[:, 0],
-                    faces_transmissibility[cur_boundary_faces_indices],
+                    clf,
+                    R_pairs,
+                    in_trans,
                 )
 
+            if len(st_boundary_faces_indices) > 0:
+                boundary_directions = self.boundary[face_stencil]
+                b_dirs = boundary_directions[st_boundary_faces_indices]
+                b_elems = self.boundary_elem_pairs[face_stencil][:, 0]
+                b_trans = faces_transmissibility[st_boundary_faces_indices]
+
+                for direction_enum, (bc_type, bc_func, bc_mult) in self.BOUNDARY.items():
+                    if bc_type != "dirichlet":
+                        continue
+
+                    matching_indices = self.matching_indices[face_stencil][direction_enum]
+
+                    if len(matching_indices) == 0:
+                        continue
+
+                    elements_to_update = b_elems[matching_indices]
+                    np.add.at(
+                        Tp,
+                        elements_to_update,
+                        b_trans[matching_indices],
+                    )
+
+                np.add.at(
+                    clf,
+                    b_elems,
+                    b_trans,
+                )
+
+        self.dmstag_manager.set_field("clf", SL.ELEMENT, 0)
+        self.dmstag_manager.set_field("clf", SL.ELEMENT, clf, use_ghost=True)
+
+        self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, 0)
         self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, Tp, use_ghost=True)
+        Tp_temp = self.dmstag_manager.get_field("elem_transmissibility", SL.ELEMENT)
+
+        self.dmstag_manager.set_field(
+            "elem_transmissibility", SL.ELEMENT, Tp_temp + gamma / self.TIME_STEP
+        )
         Tp_local = self.dmstag_manager.get_field("elem_transmissibility", SL.ELEMENT)
 
         all_internal_transmissibility = np.hstack(
@@ -908,10 +902,9 @@ class TPFASolver:
             (
                 all_internal_transmissibility,
                 all_internal_transmissibility,
-                -(Tp_local + gamma / self.TIME_STEP),
+                -(Tp_local),
             )
         )
-
         self.A.setValuesCOO(data, PETSc.InsertMode.INSERT_VALUES)
 
     def solve_system(self):
@@ -925,35 +918,8 @@ class TPFASolver:
             self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
         else:
             self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT, self.x)
-
-        # View A
-        viewer = PETSc.Viewer().createBinary(
-            f"{self.dirname}/output/A_{int(self.current_time * 1000):06d}.bin", "w", comm=self.comm
-        )
-        self.A.view(viewer)
         self.ksp.solve(self.b, self.x)
-
-        # self.export_to_npy(self.b, f"b_{self.iteration}")
-        # self.export_to_npy(self.x, f"x_{self.iteration}")
-
         self.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, self.x)
-
-    def export_to_npy(self, vec, name):
-        """
-        Export a vector to a .npy file.
-        """
-        sct, out_vec = PETSc.Scatter.toAll(vec)
-        sct.scatter(vec, out_vec)
-        if self.rank == 0:
-            dirname = self.dirname + "/output"
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
-            index = self.comm.getSize()
-            np.save(f"{dirname}/{name}_{index}.npy", out_vec.getArray())
-            logger.info(
-                f"Exported {name} vector to {dirname}/{name}_{index}.npy",
-                extra={"context": "Solver EXPORT"},
-            )
 
     def check(self, time):
         """
@@ -965,6 +931,19 @@ class TPFASolver:
                 extra={"context": "Solver CHECK"},
             )
             return
+
+        # First, checking if the time_step is above the clf
+
+        clf = self.dmstag_manager.get_field("clf", SL.ELEMENT)
+        gamma = self.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
+
+        max_time_step = np.min(gamma / clf)
+        if self.TIME_STEP > max_time_step:
+            logger.warning(
+                f"Time step {self.TIME_STEP} is larger than the maximum allowed time step {max_time_step}. "
+                "This may lead to instability in the solution.",
+                extra={"context": "Solver CHECK"},
+            )
 
         element_centroid = self.dmstag_manager.get_coordinates(SL.ELEMENT)
         pressure_sim = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
@@ -1019,6 +998,13 @@ class TPFASolver:
             f"{dirname}/output_t{int(time * 1000):06d}.vts", "w", comm=self.comm
         )
         self.dmstag_manager.view_dmda(SL.ELEMENT, viewer)
+        viewer = PETSc.Viewer().createBinary(
+            f"{self.dirname}/output/A_{int(self.current_time * 1000):06d}.bin",
+            "w",
+            comm=self.comm,
+        )
+        self.A.setName(f"A_{int(self.current_time * 1000):06d}")
+        self.A.view(viewer)
         logger.debug(
             f"Postprocessing completed, output saved to {dirname}/output_t{int(time * 1000):06d}.vts",
             extra={"context": "Solver POSTPROCESS"},

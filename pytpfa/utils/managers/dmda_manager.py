@@ -33,6 +33,7 @@ class Fields:
 
         count, ghost_count, offset, cur_dof, dof_count = cell_info
         self.dof = cur_dof
+        self.scatter = None
 
         if is_shared:
             field_indexes = np.arange(cur_dof, cur_dof + size, dtype=np.int32)
@@ -331,15 +332,20 @@ class DMDAManager:
             vec.setSizes(app_is.getSizes())
             vec.setFromOptions()
 
-        scatter = PETSc.Scatter().create(self.global_vec, petsc_is, vec, app_is)
-        scatter.scatter(
+        if not field.scatter:
+            fscatter = PETSc.Scatter().create(self.global_vec, petsc_is, vec, app_is)
+            field.fscatter = fscatter
+            fscatter.setName(f"{self.dmda.getName()}_{name}_scatter")
+        else:
+            fscatter = field.fscatter
+
+        fscatter.scatter(
             self.global_vec,
             vec,
             addv=PETSc.InsertMode.INSERT_VALUES,
             mode=PETSc.ScatterMode.FORWARD,
         )
 
-        scatter.destroy()
         vec.setName(f"{self.dmda.getName()}_{name}")
         return vec
 

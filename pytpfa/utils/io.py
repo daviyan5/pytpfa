@@ -56,7 +56,8 @@ class Well:
 
 @dataclass
 class InitialCondition:
-    pressure: Callable = field(default_factory=lambda: lambda x, y, z: np.zeros_like(x))
+    pressure: Callable = field(
+        default_factory=lambda: lambda x, y, z: np.zeros_like(x))
 
 
 @dataclass
@@ -80,7 +81,8 @@ class ReservoirConfiguration:
     initial_condition: InitialCondition
     time_settings: TimeSettings
     boundaries: Dict[str, BoundaryCondition]
-    source_term: Callable = field(default_factory=lambda: lambda x, y, z, t: np.zeros_like(x))
+    source_term: Callable = field(
+        default_factory=lambda: lambda x, y, z, t: np.zeros_like(x))
     analytical_functions: Dict[str, Callable] = field(default_factory=dict)
 
 
@@ -97,7 +99,8 @@ class ReservoirINIParser:
         description = self._parse_description()
         reservoir_input = self._parse_input()
         wells = self._parse_wells()
-        initial_condition = self._parse_initial_condition(description.analytical)
+        initial_condition = self._parse_initial_condition(
+            description.analytical)
         time_settings = self._parse_time_settings()
 
         params = self._create_params(reservoir_input, initial_condition)
@@ -105,11 +108,13 @@ class ReservoirINIParser:
 
         analytical_functions = {}
         if description.analytical and description.analytical.lower() != "none":
-            analytical_functions = self._create_analytical_functions(description.analytical, params)
+            analytical_functions = self._create_analytical_functions(
+                description.analytical, params)
 
         # At least one boundary must be dirichlet
         if not any(bc.type == "dirichlet" for bc in boundaries.values()) and not wells:
-            raise ValueError("At least one boundary condition must be dirichlet.")
+            raise ValueError(
+                "At least one boundary condition must be dirichlet.")
 
         return ReservoirConfiguration(
             description=description,
@@ -118,7 +123,8 @@ class ReservoirINIParser:
             initial_condition=initial_condition,
             time_settings=time_settings,
             boundaries=boundaries,
-            source_term=analytical_functions.get("source", lambda x, y, z, t: 0.0),
+            source_term=analytical_functions.get(
+                "source", lambda x, y, z, t: 0.0),
             analytical_functions=analytical_functions,
         )
 
@@ -197,7 +203,7 @@ class ReservoirINIParser:
             pressure = initial_condition(analytical)
         else:
             pressure_val = section.getfloat("PRESSURE", 0.0)
-            pressure = lambda x, y, z, v=pressure_val: np.full_like(x, v)
+            def pressure(x, y, z, v=pressure_val): return np.full_like(x, v)
         return InitialCondition(pressure=pressure)
 
     def _parse_time_settings(self) -> TimeSettings:
@@ -230,9 +236,11 @@ class ReservoirINIParser:
                 else:
                     value = section.getfloat("VALUE", 0.0)
                     if bc_type == "dirichlet":
-                        bc.func = lambda x, y, z, t, v=value: np.full_like(x, v)
+                        bc.func = lambda x, y, z, t, v=value: np.full_like(
+                            x, v)
                     elif bc_type == "neumann":
-                        bc.func = lambda x, y, z, t, nx, ny, nz, v=value: np.full_like(x, v)
+                        bc.func = lambda x, y, z, t, nx, ny, nz, v=value: np.full_like(
+                            x, v)
 
                 boundaries[name.lower()] = bc
             else:

@@ -102,45 +102,73 @@ To install `pytpfa`, you can use pip:
 
 ```bash
 pip install .
-```
+``` 
 
----
+Usage
 
-## Usage
-
-Basic usage of the `pytpfa` solver should look like this:
+Basic usage of the pytpfa solver should look like this:
 
 ```python
 from pytpfa import TPFASolver
 
 solver = TPFASolver("Basic Example")
 reservoir_path = "<path_to_reservoir_ini_file>"
-solver.solve(reservoir_path, postprocess=True)
-```
+solver.solve(reservoir_path, postprocess=True, checks=True)
+``` 
 
-Examples of `.ini` files can be found in the `examples` directory.
----
+Examples of .ini files can be found in the examples directory.
+
+--- 
 
 ## Examples
 
-To run the examples, you can use GNU Make:
-
-```
-make <example> MPI=<n> DEBUG=<yes|no> OPT=<yes|no> KERNPROF=<yes|no>
-```
-
-or run the following command directly:
+To run the examples, you can use GNU Make.
+Running with Make
 
 ```bash
-mpirun -n 4 python3 ../../tests/test_tpfa.py -name TPFA_Example1 -reservoir ./tools/examples/<example>/reservoir.ini
+make <target> [OPTIONS]
+```
+
+Where <target> can be one of example1, example2, example_li, etc.
+
+Options:
+
+    MPI=<n>: Set the number of MPI processes (default: 1).
+
+    DEBUG=<yes|no>: Enable PETSc debug flags (default: no).
+
+    OPT=<yes|no>: Enable optimization (reuse preconditioner, skip checks) (default: yes).
+
+    POST=<yes|no>: Enable post-processing VTK output (default: no).
+
+    PROFILE=<yes|no>: Enable performance profiling (default: no).
+
+    LIMIT=<yes|no>: Limit memory usage per process (default: no).
+
+Example:
+
+```bash 
+make example_li MPI=4 POST=yes
+``` 
+
+Running Directly
+
+You can also run the solver script directly with PETSc options:
+```bash
+mpirun -n 4 python3 tools/run.py -name TPFA_Example1 -reservoir tools/examples/example_1/reservoir.ini -opt -post
 ```
 
 ---
 
 ## Tests
 
-The module `pytest` is used for testing. To run the tests, you can use:
+The module pytest is used for testing. To run the tests with MPI, you can use:
 
 ```bash
-pytest test/
+make test MPI=<n>
+``` 
+Or run pytest directly:
+
+```bash
+mpirun -n <n> pytest
 ```

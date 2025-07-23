@@ -1,15 +1,15 @@
+from functools import reduce
+from petsc4py import PETSc
 import os
 import tempfile
 import meshio
 
 import numpy as np
 
-import sys, petsc4py
+import sys
+import petsc4py
 
 petsc4py.init(sys.argv)
-from petsc4py import PETSc
-
-from functools import reduce
 
 
 def mesh_to_dmstag(mesh_path, dofs=None):
@@ -49,7 +49,8 @@ def mesh_to_dmstag(mesh_path, dofs=None):
     if dim == 1:
         dm.setUniformCoordinatesExplicit(coords[0][0], coords[0][-1])
     elif dim == 2:
-        dm.setUniformCoordinatesExplicit(coords[0][0], coords[0][-1], coords[1][0], coords[1][-1])
+        dm.setUniformCoordinatesExplicit(
+            coords[0][0], coords[0][-1], coords[1][0], coords[1][-1])
     elif dim == 3:
         dm.setUniformCoordinatesExplicit(
             coords[0][0],
@@ -67,7 +68,8 @@ def create_3d_dmstag(
     sizes=(2, 2, 2), h=(0.5, 0.5, 0.5), dofs=(1, 1, 1, 1), name="Mesh", cache=True
 ):
     cache_folder = "pytpfa"
-    cache_path = os.path.join(tempfile.gettempdir(), cache_folder, f"{name}.h5")
+    cache_path = os.path.join(tempfile.gettempdir(),
+                              cache_folder, f"{name}.h5")
     # if cache and os.path.exists(cache_path):
     #     viewer = PETSc.Viewer().createHDF5(cache_path, "r")
     #     dm = PETSc.DMStag().load(viewer)

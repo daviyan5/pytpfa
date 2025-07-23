@@ -59,12 +59,16 @@ class ColoredConsoleFormatter(logging.Formatter):
         levelname = f"{level_color}{record.levelname:<8}{self.RESET}"
 
         context = getattr(record, "context", "N/A")
-        if context not in self._context_color_map:
+
+        # Use a base context name for consistent coloring (e.g., "Solver ITERATION" for "Solver ITERATION [1]")
+        base_context = re.sub(r"\s*\[.*\]$", "", context)
+
+        if base_context not in self._context_color_map:
             color = self.CONTEXT_COLORS[self._color_index % len(self.CONTEXT_COLORS)]
-            self._context_color_map[context] = color
+            self._context_color_map[base_context] = color
             self._color_index += 1
 
-        context_color = self._context_color_map[context]
+        context_color = self._context_color_map[base_context]
         context_str = f"{context_color}{context:<25}{self.RESET}"
 
         msg = f"{self.WHITE}{record.msg}{self.RESET}"
@@ -72,6 +76,7 @@ class ColoredConsoleFormatter(logging.Formatter):
         file_line = f"{record.filename}:{record.lineno}"
         record.fileinfo = f"[{file_line:<{self.FILE_INFO_WIDTH}}]"
 
+        # Temporarily replace record attributes for formatting
         old_levelname = record.levelname
         old_context = getattr(record, "context", None)
         old_msg = record.msg
@@ -84,6 +89,7 @@ class ColoredConsoleFormatter(logging.Formatter):
 
         formatted = super().format(record)
 
+        # Restore original attributes
         record.levelname = old_levelname
         record.context = old_context
         record.msg = old_msg
