@@ -2,7 +2,6 @@
 import os
 import logging
 import numpy as np
-import json
 
 import sys
 import petsc4py
@@ -26,14 +25,13 @@ STENCIL_NAME = {
 }
 
 
-class TPFASolver:
+class TPFASolverTS:
     def __init__(self, name):
         self.name = name
 
         self.out_info = {
             "name": self.name,
             "rank": 0,
-            "n_ranks": 0,
             "n_elements": 0,
             "n_iterations": 0,
             "l1_error": [],
@@ -48,17 +46,30 @@ class TPFASolver:
         # For boundary conditions
         self.matching_indices = {}
 
+        # For TS
+        self.residual = None
+        self.ts = None
+
+        # Dict to avoid unnecessary updates
+        self.last_time = {
+            "update_system": -1.0,
+            "set_boundary_conditions": -1.0,
+            "assemble_matrix": -1.0,
+            "assemble_rhs": -1.0,
+        }
+
     def solve(self, reservoir_path, checks=True, postprocess=False):
         self.do_checks = checks
+        self.do_postprocess = postprocess
         self.comm = PETSc.COMM_WORLD
         self.rank = PETSc.COMM_WORLD.getRank()
         self.out_info["rank"] = self.rank
-        self.out_info["n_ranks"] = self.comm.getSize()
         self.b, self.x = None, None
+
         try:
             self.iteration = 0
             logger.info(
-                f"Starting simulation with TPFASolver for {self.name} in rank {self.rank}",
+                f"Starting simulation with TPFASolverTS for {self.name} in rank {self.rank}",
                 extra={"context": "Solver SOLVE"},
             )
             self.preprocessing_time = 0.0
@@ -82,52 +93,41 @@ class TPFASolver:
                 extra={"context": "Solver SOLVE"},
             )
 
-            times = np.arange(self.TIME_INITIAL, self.TIME_FINAL + self.TIME_STEP, self.TIME_STEP)
-            self.out_info["n_iterations"] = len(times) - 1
+            # Solve using TS
+            solving_start = time()
             self.comm.barrier()
-            for t_idx, (t_n, t_np1) in enumerate(zip(times[:-1], times[1:])):
 
-                self.iteration = t_idx
-                self.current_time = t_n
+            # Set initial conditions
+            self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
+            self.ts.setSolution(self.x)
 
-                logger.info(
-                    f"Starting time {t_n:.2f} to {t_np1:.2f}",
-                    extra={"context": f"Solver ITERATION [{self.iteration}]"},
-                )
-                updating_start = time()
-                self.update_system()
-                self.set_boundary_conditions()
-                self.assemble_system()
-                updating_end = time()
+            # Run the time stepping solver
+            self.ts.solve(self.x)
 
-                self.updating_time += updating_end - updating_start
+            solving_end = time()
+            self.solving_time = solving_end - solving_start
 
-                start_solve = time()
-                self.solve_system()
-                end_solve = time()
+            # Get final time and step count
+            final_time = self.ts.getTime()
+            step_count = self.ts.getStepNumber()
 
-                if self.do_checks:
-                    self.check(t_np1)
-
-                self.solving_time += end_solve - start_solve
-
-                iteration_time = end_solve - updating_start
-                logger.info(
-                    f"Time to execute iteration {iteration_time:.2f} seconds",
-                    extra={"context": f"Solver ITERATION [{self.iteration}]"},
-                )
-
-                if postprocess:
-                    self.postprocess(t_np1)
+            self.out_info["n_iterations"] = step_count
 
             end_time = time()
             self.simulation_time = end_time - starting_time
 
             self.out_info["total_time"] = self.simulation_time
-            self.out_info["solving_time"] = self.solving_time
+            self.out_info["solving_time"] = (
+                self.solving_time - self.updating_time
+            )  # Subtract updating time from solving
             self.out_info["updating_time"] = self.updating_time
+
             logger.info(
-                f"Total solving time: {self.solving_time:.2f} seconds",
+                f"Final time: {final_time:.2f}, Total steps: {step_count}",
+                extra={"context": "Solver SOLVE"},
+            )
+            logger.info(
+                f"Total solving time: {self.solving_time - self.updating_time:.2f} seconds",
                 extra={"context": "Solver SOLVE"},
             )
             logger.info(
@@ -138,7 +138,6 @@ class TPFASolver:
                 f"Total simulation time: {self.simulation_time:.2f} seconds",
                 extra={"context": "Solver SOLVE"},
             )
-            self.export_info()
 
         except Exception as e:
             logger.error(
@@ -147,7 +146,7 @@ class TPFASolver:
             logger.error("Traceback:", exc_info=True)
 
     def prepare_fields(self):
-        logger.info("Preparing fields for TPFASolver...", extra={"context": "Solver PREPROCESS"})
+        logger.info("Preparing fields for TPFASolverTS...", extra={"context": "Solver PREPROCESS"})
         self.dmstag_manager = DMStagManager(3)
 
         # We won't use edges
@@ -159,12 +158,14 @@ class TPFASolver:
         self.dmstag_manager.add_field("permeability", 3, 3, is_shared=True)  # K
         self.dmstag_manager.add_field("porosity", 1, 3)  # φ
         self.dmstag_manager.add_field("formation_factor", 1, 3)  # B
-        self.dmstag_manager.add_field("accumulation_coefficient", 1, 3)  # Gamma
+        self.dmstag_manager.add_field("accumulation_coefficient", 1, 3, is_shared=True)  # Gamma
         self.dmstag_manager.add_field("external_source", 1, 3, is_shared=True)  # S_u
         self.dmstag_manager.add_field("rhs", 1, 3, is_shared=True)  # Right-hand side vector
         self.dmstag_manager.add_field(
             "elem_transmissibility", 1, 3, is_shared=True
         )  # Transmissibility for the element
+        # self.dmstag_manager.add_field("clf", 1, 3, is_shared=True)
+        self.dmstag_manager.add_field("residual", 1, 3, is_shared=True)  # Residual vector
 
         # Faces fields
         self.dmstag_manager.add_field("area", 1, 2)
@@ -330,7 +331,6 @@ class TPFASolver:
         self.analytical_solution = (
             config.analytical_functions["solution"] if config.analytical_functions else None
         )
-        self.reference = config.reference if config.reference else None
 
     def preprocess_mesh(self):
         """
@@ -569,10 +569,11 @@ class TPFASolver:
 
     def setup_solver(self):
         """
-        Setup KSP solver
+        Setup TS solver
         """
-        logger.info("Setting up the KSP solver...", extra={"context": "Solver SETUP"})
+        logger.info("Setting up the TS solver...", extra={"context": "Solver SETUP"})
 
+        # Prepare the matrix connectivity (same as original solver)
         all_elem_pairs = np.vstack(
             tuple(
                 [
@@ -610,26 +611,14 @@ class TPFASolver:
             f"Number of rows: {len(rows)}, Number of cols: {len(cols)}",
             extra={"context": "Solver SETUP"},
         )
-        logger.debug(
-            f"Range of rows: {np.min(rows)} to {np.max(rows)}",
-            extra={"context": "Solver SETUP"},
-        )
-        logger.debug(
-            f"Range of cols: {np.min(cols)} to {np.max(cols)}",
-            extra={"context": "Solver SETUP"},
-        )
 
+        # Create the matrix
         self.A = PETSc.Mat().create()
         n_elems = self.dmstag_manager.get_count(SL.ELEMENT)
         n_elems_global = self.dmstag_manager.get_count(SL.ELEMENT, is_global=True)
 
         self.A.setSizes([(n_elems, n_elems_global), (n_elems, n_elems_global)])
         self.A.setFromOptions()
-
-        logger.debug(
-            f"Starting preallocation...",
-            extra={"context": "Solver SETUP"},
-        )
         self.A.setPreallocationCOO(rows, cols)
 
         logger.debug(
@@ -637,26 +626,35 @@ class TPFASolver:
             extra={"context": "Solver SETUP"},
         )
 
-        logger.debug(
-            f"Local size of A Mat: {self.A.getLocalSize()}",
-            extra={"context": "Solver SETUP"},
-        )
+        self.residual = self.dmstag_manager.get_field_vec("residual", SL.ELEMENT)
 
-        self.ksp = PETSc.KSP().create()
-        self.ksp.setType(PETSc.KSP.Type.FGMRES)
-        self.ksp.getPC().setType(PETSc.PC.Type.MG)
-        self.ksp.setOperators(self.A)
-        self.ksp.setFromOptions()
+        self.ts = PETSc.TS().create(self.comm)
+        self.ts.setProblemType(PETSc.TS.ProblemType.LINEAR)
+        self.ts.setType(PETSc.TS.Type.BEULER)
+        self.ts.setDM(self.dmstag_manager.get_dmda(SL.ELEMENT))
+
+        self.ts.setMonitor(monitor, args=(self,))
+
+        self.ts.setIFunction(compute_residual, self.residual, args=(self,))
+        self.ts.setIJacobian(compute_jacobian, self.A, self.A, args=(self,))
+
+        self.ts.setTime(self.TIME_INITIAL)
+        self.ts.setTimeStep(self.TIME_STEP)
+        self.ts.setMaxTime(self.TIME_FINAL)
+        self.ts.setMaxSteps(int((self.TIME_FINAL - self.TIME_INITIAL) / self.TIME_STEP) + 10)
+        self.ts.setExactFinalTime(PETSc.TS.ExactFinalTime.STEPOVER)
+
+        self.ts.setFromOptions()
 
     def update_system(self):
-        """
-        Variables that change during time stepping:
-            Accumulation Coefficient (gamma)
-            Fluid Transmissibility (Ty, Tz, Tx)
-            Formation Volume Factor (B)
-
-        """
-        logger.info(
+        if self.last_time["update_system"] == self.current_time:
+            logger.debug(
+                f"Skipping update for iteration {self.iteration} at time {self.current_time:.2f}",
+                extra={"context": f"Solver UPDATE [{self.iteration}]"},
+            )
+            return
+        self.last_time["update_system"] = self.current_time
+        logger.debug(
             "Updating system variables...", extra={"context": f"Solver UPDATE [{self.iteration}]"}
         )
         pressure = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
@@ -678,17 +676,9 @@ class TPFASolver:
         )
         self.dmstag_manager.set_field("accumulation_coefficient", SL.ELEMENT, gamma_array)
 
-        logger.debug(
-            f"Setting fluid transmissibility and formation volume factor...",
-            extra={"context": f"Solver UPDATE [{self.iteration}]"},
-        )
         self.comm.barrier()
         pressure = self.dmstag_manager.get_field("pressure", SL.ELEMENT, use_ghost=True)
         for face_stencil in [SL.LEFT, SL.BACK, SL.DOWN]:
-            logger.debug(
-                f"Updating fluid transmissibility",
-                extra={"context": f"Solver UPDATE {STENCIL_NAME[face_stencil]} [{self.iteration}]"},
-            )
             transmissibility = self.dmstag_manager.get_field("transmissibility", face_stencil)
             fluid_transmissibility = np.zeros_like(transmissibility)
 
@@ -712,7 +702,6 @@ class TPFASolver:
                     pressure_vals = pressure[elem_pairs[:, 0]]
                     initial_pressure_vals = self.INITIAL_PRESSURE_GHOST[elem_pairs[:, 0]]
 
-                # Common B calculation
                 B_vals = self.B_REF_FORMATION_FACTOR / (
                     1.0 + self.FLUID_COMPRESSIBILITY * (pressure_vals - initial_pressure_vals)
                 )
@@ -722,19 +711,19 @@ class TPFASolver:
                     B_vals * self.VISCOSITY
                 )
 
-            logger.debug(
-                f"Average fluid transmissibility: {np.mean(fluid_transmissibility)}",
-                extra={"context": f"Solver UPDATE {STENCIL_NAME[face_stencil]} [{self.iteration}]"},
-            )
             self.dmstag_manager.set_field(
                 "fluid_transmissibility", face_stencil, fluid_transmissibility
             )
 
     def set_boundary_conditions(self):
-        """
-        Set boundary conditions by modifying transmissibility and source terms.
-        """
-        logger.info(
+        if self.last_time["set_boundary_conditions"] == self.current_time:
+            logger.debug(
+                f"Skipping boundary conditions for iteration {self.iteration} at time {self.current_time:.2f}",
+                extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
+            )
+            return
+        self.last_time["set_boundary_conditions"] = self.current_time
+        logger.debug(
             "Setting boundary conditions...",
             extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
         )
@@ -800,22 +789,18 @@ class TPFASolver:
         S_u_local = self.dmstag_manager.get_field("external_source", SL.ELEMENT)
 
         for local_idx, well in self.well_indices:
-            logger.debug(
-                f"Adding well source term for well {well["name"]} at index ({well["index"]})",
-                extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
-            )
             S_u_local[local_idx] = well["rate"] + well["J"] * well["pressure"]
 
         self.dmstag_manager.set_field("external_source", SL.ELEMENT, S_u_local)
 
-    def assemble_system(self):
-        """
-        Assemble the system matrix and right-hand side vector.
-        """
-        logger.info(
-            "Assembling the system...", extra={"context": f"Solver ASSEMBLE [{self.iteration}]"}
-        )
-
+    def assemble_rhs(self):
+        if self.last_time["assemble_rhs"] == self.current_time:
+            logger.debug(
+                f"Skipping RHS assembly for iteration {self.iteration} at time {self.current_time:.2f}",
+                extra={"context": f"Solver RHS [{self.iteration}]"},
+            )
+            return
+        self.last_time["assemble_rhs"] = self.current_time
         S_u = self.dmstag_manager.get_field("external_source", SL.ELEMENT)
 
         xe, ye, ze = self.dmstag_manager.get_coordinates(SL.ELEMENT).T
@@ -827,7 +812,16 @@ class TPFASolver:
         b = -(S_u + gamma * pressure / self.TIME_STEP)
         self.dmstag_manager.set_field("rhs", SL.ELEMENT, b)
 
+    def assemble_matrix(self):
+        if self.last_time["assemble_matrix"] == self.current_time:
+            logger.debug(
+                f"Skipping matrix assembly for iteration {self.iteration} at time {self.current_time:.2f}",
+                extra={"context": f"Solver MATRIX [{self.iteration}]"},
+            )
+            return
+        self.last_time["assemble_matrix"] = self.current_time
         Tp = np.zeros(self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)).flatten()
+        # clf = np.zeros(self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)).flatten()
 
         for face_stencil in [SL.LEFT, SL.BACK, SL.DOWN]:
             faces_transmissibility = self.dmstag_manager.get_field(
@@ -841,17 +835,10 @@ class TPFASolver:
                 in_trans = faces_transmissibility[st_internal_faces_indices]
                 L_pairs = st_internal_elem_pairs[:, 0]
                 R_pairs = st_internal_elem_pairs[:, 1]
-                np.add.at(
-                    Tp,
-                    L_pairs,
-                    in_trans,
-                )
-
-                np.add.at(
-                    Tp,
-                    R_pairs,
-                    in_trans,
-                )
+                np.add.at(Tp, L_pairs, in_trans)
+                # np.add.at(clf, L_pairs, in_trans)
+                np.add.at(Tp, R_pairs, in_trans)
+                # np.add.at(clf, R_pairs, in_trans)
 
             if len(st_boundary_faces_indices) > 0:
                 boundary_directions = self.boundary[face_stencil]
@@ -869,19 +856,13 @@ class TPFASolver:
                         continue
 
                     elements_to_update = b_elems[matching_indices]
-                    np.add.at(
-                        Tp,
-                        elements_to_update,
-                        b_trans[matching_indices],
-                    )
+                    np.add.at(Tp, elements_to_update, b_trans[matching_indices])
+
+        # self.dmstag_manager.set_field("clf", SL.ELEMENT, 0)
+        # self.dmstag_manager.set_field("clf", SL.ELEMENT, clf, use_ghost=True)
 
         self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, 0)
         self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, Tp, use_ghost=True)
-        Tp_temp = self.dmstag_manager.get_field("elem_transmissibility", SL.ELEMENT)
-
-        self.dmstag_manager.set_field(
-            "elem_transmissibility", SL.ELEMENT, Tp_temp + gamma / self.TIME_STEP
-        )
         Tp_local = self.dmstag_manager.get_field("elem_transmissibility", SL.ELEMENT)
 
         all_internal_transmissibility = np.hstack(
@@ -904,42 +885,31 @@ class TPFASolver:
         )
         self.A.setValuesCOO(data, PETSc.InsertMode.INSERT_VALUES)
 
-    def solve_system(self):
-        """
-        Solve the linear system Ax = b
-        """
-        logger.info("Solving the system...", extra={"context": f"Solver SOLVE [{self.iteration}]"})
-        self.comm.barrier()
-        self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT, self.b)
-        if self.x is None:
-            self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
-        else:
-            self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT, self.x)
-        self.ksp.solve(self.b, self.x)
-        self.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, self.x)
-
     def check(self, time):
-        """
-        Check the solution against the analytical solution using standard error norms.
-        """
         if not self.analytical_solution:
             logger.debug(
-                "Problem does not have an analytical solution.",
+                "Problem does not have an analytical solution, skipping check.",
                 extra={"context": "Solver CHECK"},
             )
-            if self.reference is not None:
-                # self.reference has the path (relative to the config file) to a .py script that implements the function "analytical"
-                # this function takes (x, y, z, t) as input and returns the analytical solution at that point
-                import importlib.util
+            return
 
-                spec = importlib.util.spec_from_file_location(
-                    "analytical_module", os.path.join(self.dirname, self.reference)
-                )
-                analytical_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(analytical_module)
-                self.analytical_solution = analytical_module.analytical
-            else:
-                return
+        # First, checking if the time_step is above the clf
+        # clf = self.dmstag_manager.get_field("clf", SL.ELEMENT)
+        # gamma = self.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
+        # if np.all(clf == 0):
+        #     logger.warning(
+        #         "Cannot perform stability check.",
+        #         extra={"context": "Solver CHECK"},
+        #     )
+        #     return
+
+        # max_time_step = np.min(gamma / clf)
+        # if self.TIME_STEP > max_time_step:
+        #     logger.warning(
+        #         f"Time step {self.TIME_STEP} is larger than the maximum allowed time step {max_time_step}. "
+        #         "This may lead to instability in the solution.",
+        #         extra={"context": "Solver CHECK"},
+        #     )
 
         element_centroid = self.dmstag_manager.get_coordinates(SL.ELEMENT)
         pressure_sim = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
@@ -970,7 +940,7 @@ class TPFASolver:
 
         log_message = f"L1={l1_error:.4e}, L2={l2_error:.4e}, L_inf={linf_error:.4e}"
 
-        if l2_error > 1e-1:
+        if l2_error > 1e-3:
             logger.warning(log_message, extra={"context": "Solver CHECK"})
         else:
             logger.info(log_message, extra={"context": "Solver CHECK"})
@@ -979,18 +949,11 @@ class TPFASolver:
         self.out_info["l2_error"].append(l2_error)
         self.out_info["linf_error"].append(linf_error)
 
-    def get_info(self):
-        """
-        Return the solver information.
-        """
-        return out_info
-
     def postprocess(self, time):
         dirname = self.dirname + "/output"
         if self.rank == 0:
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
-        self.comm.barrier()
         viewer = PETSc.Viewer().createVTK(
             f"{dirname}/output_t{int(time * 1000):06d}.vts", "w", comm=self.comm
         )
@@ -1007,34 +970,92 @@ class TPFASolver:
             extra={"context": "Solver POSTPROCESS"},
         )
 
-    def export_info(self):
-        """
-        Export the 'out_info' dictionary to a JSON file inside output folder.
-        """
-
-        class NpEncoder(json.JSONEncoder):
-            def default(self, obj):
-                if isinstance(obj, np.integer):
-                    return int(obj)
-                if isinstance(obj, np.floating):
-                    return float(obj)
-                if isinstance(obj, np.ndarray):
-                    return obj.tolist()
-                return json.JSONEncoder.default(self, obj)
-
-        if self.rank == 0:
-            dirname = self.dirname + "/output"
-            filename = self.name + f"{self.out_info['n_ranks']}_{self.out_info['n_elements']}.json"
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
-            with open(f"{dirname}/{filename}", "w") as f:
-                json.dump(self.out_info, f, indent=4, cls=NpEncoder)
-            logger.info(
-                f"Solver information exported to {dirname}/{filename}.json",
-                extra={"context": "Solver INFO"},
-            )
-        self.comm.barrier()
+    def get_info(self):
+        return self.out_info
 
     def __repr__(self):
-        """Return a string representation of the TPFASolver."""
-        return "TODO"
+        return f"TPFASolverTS(name={self.name})"
+
+
+def monitor(ts, step, time, U, ctx):
+    """
+    Monitor function called at each time step
+    """
+    ctx.iteration = step
+    ctx.current_time = time
+
+    logger.info(
+        f"Time step {step}: t = {time:.2f}",
+        extra={"context": f"Solver MONITOR [{step}]"},
+    )
+
+    ctx.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, U)
+
+    if ctx.do_checks:
+        ctx.check(time)
+
+    if ctx.do_postprocess:
+        ctx.postprocess(time)
+
+    return 0
+
+
+def compute_residual(ts, t, U, U_t, residual, ctx):
+    """
+    Compute the residual F = U_t - A*U - b
+    For the implicit form: F(t, u, u_t) = 0
+    """
+    updating_start = time()
+
+    ctx.current_time = t
+
+    ctx.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, U)
+
+    ctx.update_system()
+    ctx.set_boundary_conditions()
+
+    ctx.assemble_rhs()
+    b = ctx.dmstag_manager.get_field_vec("rhs", SL.ELEMENT, ctx.b)
+
+    ctx.assemble_matrix()
+    ctx.A.mult(U, residual)
+
+    gamma = ctx.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
+    gamma_vec = ctx.dmstag_manager.get_field_vec("accumulation_coefficient", SL.ELEMENT)
+
+    work_vec = U_t.duplicate()
+    work_vec.pointwiseMult(gamma_vec, U_t)
+
+    residual.axpy(1.0, work_vec)
+    residual.axpy(-1.0, b)
+
+    work_vec.destroy()
+
+    updating_end = time()
+    ctx.updating_time += updating_end - updating_start
+
+    return 0
+
+
+def compute_jacobian(ts, t, U, U_t, shift, J, P, ctx):
+    updating_start = time()
+
+    ctx.current_time = t
+
+    ctx.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, U)
+
+    ctx.update_system()
+    ctx.assemble_matrix()
+
+    gamma = ctx.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
+    all_elem = ctx.dmstag_manager.get_global_indices(SL.ELEMENT)
+
+    for i, elem_idx in enumerate(all_elem):
+        J.setValue(elem_idx, elem_idx, shift * gamma[i], PETSc.InsertMode.ADD_VALUES)
+
+    J.assemble()
+
+    updating_end = time()
+    ctx.updating_time += updating_end - updating_start
+
+    return 0

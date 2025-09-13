@@ -21,7 +21,10 @@ dependencies = [
     "pandas",
     "matplotlib",
     "line_profiler",
-    "tabulate"
+    "tabulate",
+    "seaborn",
+    "tqdm",
+    "psutil"
 ]
 
 [project.urls]

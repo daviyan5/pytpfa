@@ -127,6 +127,21 @@ class DMStagManager:
         elif stencil_loc == SL.ELEMENT:
             return 3
 
+    def get_dmda(self, stencil_loc):
+        """
+        Get the DMDA for a specific stencil location.
+        Parameters:
+            stencil_loc: DMStag.StencilLocation to get the DMDA for
+        Returns:
+            PETSc.DMDA for the specified stencil location
+        """
+        if self.dmstag is None:
+            raise ValueError("DMStag is not set. Call set_dm() first.")
+
+        dmda_manager = self._get_dmda_manager(stencil_loc)
+
+        return dmda_manager.dmda
+
     def _get_dmda_manager(self, stencil_loc):
         """
         Get or create a cell manager for a specific cell dimension and stencil location.

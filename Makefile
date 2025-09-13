@@ -52,7 +52,7 @@ endif
 
 # --- Command Definitions ---
 PYTHON_EXEC = python3 $(RUN_DIR)
-MPIRUN_CMD = mpirun --bind-to core -n $(MPI)
+MPIRUN_CMD = mpirun --bind-to core --use-hwthread-cpus -n $(MPI)
 ALL_FLAGS = $(DEBUG_FLAG) $(OPT_FLAG) $(POST_FLAG) $(PROFILE_FLAG)
 
 # --- Example Definitions ---
@@ -102,7 +102,7 @@ compare_li:
 clean:
 	@echo "Cleaning generated files from $(EXAMPLE_DIR)..."
 	@find $(EXAMPLE_DIR) -path '*/truth' -prune -o \
-		\( -name "*.log" -o -name "*.lprof" -o -name "*.vts" -o -name "*.vtk" -o -name "*.npy" -o -name "*.info" -o -name "*.bin" \) \
+		\( -name "*.log" -o -name "*.lprof" -o -name "*.vts" -o -name "*.vtk" -o -name "*.npy" -o -name "*.info" -o -name "*.bin" -o -name -"*.json" \) \
 		-type f -exec rm -f {} +
 	@echo "Clean complete."
 

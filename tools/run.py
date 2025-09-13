@@ -6,7 +6,7 @@ import petsc4py
 petsc4py.init(sys.argv)
 
 from petsc4py import PETSc
-from pytpfa.model import TPFASolver
+from pytpfa.model import TPFASolver, TPFASolverTS
 
 from scripts.configure import (
     setup_logging,
