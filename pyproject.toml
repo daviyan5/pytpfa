@@ -15,7 +15,7 @@ dependencies = [
     "mpi4py",
     "sympy",
     "pytest",
-    "petsc4py",
+    "petsc4py==3.23.6",
     "meshio",
     "pyvista",
     "pandas",
