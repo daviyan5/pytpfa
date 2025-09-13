@@ -13,7 +13,13 @@ import subprocess
 import time
 import threading
 import numpy as np
+
+import matplotlib
+
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
+
 import seaborn as sns
 import psutil
 from pathlib import Path
@@ -202,7 +208,6 @@ def test_correctness(temp_dir: Path):
 
         plt.tight_layout()
         plt.savefig("teste_corretude.png", dpi=300, bbox_inches="tight")
-        plt.show()
 
     return results_data
 

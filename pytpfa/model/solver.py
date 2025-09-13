@@ -1030,7 +1030,7 @@ class TPFASolver:
             with open(f"{dirname}/{filename}", "w") as f:
                 json.dump(self.out_info, f, indent=4, cls=NpEncoder)
             logger.info(
-                f"Solver information exported to {dirname}/{filename}.json",
+                f"Solver information exported to {dirname}/{filename}",
                 extra={"context": "Solver INFO"},
             )
         self.comm.barrier()

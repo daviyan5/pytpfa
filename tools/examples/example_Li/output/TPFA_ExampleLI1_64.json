@@ -7,8 +7,8 @@
     "l1_error": [],
     "l2_error": [],
     "linf_error": [],
-    "total_time": 0.02890777587890625,
-    "preprocessing_time": 0.009399175643920898,
-    "solving_time": 0.002685070037841797,
-    "updating_time": 0.013784408569335938
+    "total_time": 0.029839754104614258,
+    "preprocessing_time": 0.009038209915161133,
+    "solving_time": 0.003183603286743164,
+    "updating_time": 0.015188932418823242
 }
