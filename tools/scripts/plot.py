@@ -213,16 +213,6 @@ def plot_performance(data, output_path):
             all_times.extend([d["preprocessing"], d["updating"], d["solving"]])
             all_memory.append(d["memory"])
 
-    if all_times:
-        time_min, time_max = min(all_times) * 0.8, max(all_times) * 1.2
-    else:
-        time_min, time_max = 0.1, 100
-
-    if all_memory:
-        memory_min, memory_max = min(all_memory) * 0.8, max(all_memory) * 1.2
-    else:
-        memory_min, memory_max = 1, 1000
-
     fig, axes = plt.subplots(
         2, num_mpi_configs, figsize=(7 * num_mpi_configs, 12), constrained_layout=False
     )
@@ -260,9 +250,6 @@ def plot_performance(data, output_path):
         ax_time.set_xlabel("Elementos", fontsize=11)
         ax_time.set_ylabel("Tempo (s)", fontsize=11)
         ax_time.grid(True, which="both", ls="--", alpha=0.4)
-        ax_time.set_xscale("log")
-        ax_time.set_yscale("log")
-        ax_time.set_ylim(time_min, time_max)
         ax_time.legend(title="Etapa do Processo")
 
         ax_mem = axes[1, col]
@@ -280,9 +267,6 @@ def plot_performance(data, output_path):
         ax_mem.set_xlabel("Elementos", fontsize=11)
         ax_mem.set_ylabel("Memória (MB)", fontsize=11)
         ax_mem.grid(True, which="both", ls="--", alpha=0.4)
-        ax_mem.set_xscale("log")
-        ax_mem.set_yscale("log")
-        ax_mem.set_ylim(memory_min, memory_max)
         ax_mem.yaxis.set_major_formatter(ticker.ScalarFormatter(useMathText=True))
         ax_mem.ticklabel_format(style="scientific", axis="y", scilimits=(0, 0))
 

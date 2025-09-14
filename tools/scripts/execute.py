@@ -25,9 +25,9 @@ SIZES = [
     (256, 128, 1),
     (512, 256, 1),
     (1024, 512, 1),
-    (2048, 1024, 1),
-    (4096, 2048, 1),
-    (8192, 4096, 1),
+    # (2048, 1024, 1),
+    # (4096, 2048, 1),
+    # (8192, 4096, 1),
 ]
 
 MPI_MAX = 16
@@ -36,6 +36,7 @@ SIZES = SIZES[::-1]
 
 MPI_PROCESSES_STRONG = np.arange(1, MPI_MAX + 1, 1).tolist()
 MPI_PROCESSES_PERFORMANCE = [4**i for i in range(np.log2(MPI_MAX).astype(int) // 2 + 1)]
+# MPI_PROCESSES_PERFORMANCE = [1, 2, 4, 6, 8]
 
 
 def create_reservoir_ini(
@@ -57,12 +58,22 @@ def create_reservoir_ini(
     config["RESERVOIR_INPUT"]["NY"] = str(ny)
     config["RESERVOIR_INPUT"]["NZ"] = str(nz)
 
+    original_time_step = config["TIME_SETTINGS"].getfloat("TIME_STEP")
+    original_final_time = config["TIME_SETTINGS"].getfloat("TIME_FINAL")
+
     if correctness:
-        # We must decrease the time step if we increase the number of elements
-        original_time_step = config["TIME_SETTINGS"].getfloat("TIME_STEP")
-        new_time_step = original_time_step / factor**2
+        new_time_step = original_time_step / factor
         config["TIME_SETTINGS"]["TIME_STEP"] = str(new_time_step)
 
+        new_final_time = original_final_time / factor
+        config["TIME_SETTINGS"]["TIME_FINAL"] = str(new_final_time)
+
+    timestep = config["TIME_SETTINGS"].getfloat("TIME_STEP")
+    final_time = config["TIME_SETTINGS"].getfloat("TIME_FINAL")
+    num_steps = int(final_time / timestep)
+    print(f"  - Ajustando TIME_STEP de {original_time_step} para {timestep}")
+    print(f"  - Ajustando TIME_FINAL de {original_final_time} para {final_time}")
+    print(f"  - Número de passos de tempo: {num_steps}")
     with open(output_path, "w") as f:
         config.write(f)
 
@@ -126,6 +137,8 @@ def run_solver(
         "mpirun",
         "--bind-to",
         "core",
+        "--map-by",
+        "core",
         "-n",
         str(mpi_processes),
         "python3",
@@ -138,7 +151,7 @@ def run_solver(
         "-ksp_type",
         "gmres",
         "-pc_type",
-        "mg",
+        "hypre",
     ]
 
     memory_data = {}
@@ -152,8 +165,8 @@ def run_solver(
     monitor_thread.join()
 
     if process.returncode != 0:
-        print(f"Erro ao executar solver: {stderr.decode()}")
-        print(f"Stdout: {stdout.decode()}")
+        print(f"Erro ao executar solver: {stderr}")
+        print(f"Stdout: {stdout}")
         return None, memory_data
 
     json_files = list(output_dir.glob("*.json"))
@@ -187,9 +200,9 @@ def test_correctness(temp_dir: Path, og_ini_path: Path):
                 {
                     "size": total_size,
                     "nx": nx,
-                    "l1_error": float(results["l1_error"][0]),
-                    "l2_error": float(results["l2_error"][0]),
-                    "linf_error": float(results["linf_error"][0]),
+                    "l1_error": float(results["l1_error"][-1]),
+                    "l2_error": float(results["l2_error"][-1]),
+                    "linf_error": float(results["linf_error"][-1]),
                 }
             )
 
@@ -213,10 +226,13 @@ def test_strong_scaling(temp_dir: Path, og_ini_path: Path):
         results, memory = run_solver(str(ini_path), mpi_procs, f"TPFA_Strong_{mpi_procs}", opt=True)
 
         if results:
+            total_time = (
+                results["preprocessing_time"] + results["updating_time"] + results["solving_time"]
+            )
             results_data.append(
                 {
                     "mpi": int(mpi_procs),
-                    "time": float(results["total_time"]),
+                    "time": float(total_time),
                     "memory_max": float(memory.get("max", 0)),
                     "memory_avg": float(memory.get("avg", 0)),
                     "total_size": total_size,
@@ -230,11 +246,11 @@ def test_weak_scaling(temp_dir: Path, og_ini_path: Path):
     print("\n=== TESTE DE ESCALABILIDADE FRACA ===")
 
     weak_configs = [
-        ((128, 128, 1), 1),
-        ((256, 128, 1), 2),
-        ((256, 256, 1), 4),
-        ((512, 256, 1), 8),
-        ((512, 512, 1), 16),
+        ((32, 32, 1), 1),
+        ((64, 32, 1), 2),
+        ((64, 64, 1), 4),
+        ((128, 64, 1), 8),
+        # ((512, 512, 1), 16),
     ]
 
     results_data = []
@@ -255,11 +271,14 @@ def test_weak_scaling(temp_dir: Path, og_ini_path: Path):
         )
 
         if results:
+            total_time = (
+                results["preprocessing_time"] + results["updating_time"] + results["solving_time"]
+            )
             results_data.append(
                 {
                     "size": int(total_size),
                     "mpi": int(mpi_procs),
-                    "time": float(results["total_time"]),
+                    "time": float(total_time),
                     "memory_max": float(memory.get("max", 0)),
                     "memory_avg": float(memory.get("avg", 0)),
                     "elements_per_proc": float(elements_per_proc),
@@ -274,13 +293,15 @@ def test_performance(temp_dir: Path, og_ini_path: Path):
 
     all_results = {mpi: [] for mpi in MPI_PROCESSES_PERFORMANCE}
 
-    for nx, ny, nz in SIZES:
+    for i, (nx, ny, nz) in enumerate(SIZES):
         total_size = nx * ny * nz
 
         ini_path = temp_dir / f"reservoir_perf_{total_size}.ini"
         create_reservoir_ini(og_ini_path, str(ini_path), nx, ny, nz)
 
         for mpi_procs in MPI_PROCESSES_PERFORMANCE:
+            if i <= 1 and mpi_procs == 1:
+                continue  # Too big for 1 process
             print(f"Executando {total_size} elementos com {mpi_procs} processos...")
 
             results, memory = run_solver(

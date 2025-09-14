@@ -84,7 +84,6 @@ class TPFASolver:
 
             times = np.arange(self.TIME_INITIAL, self.TIME_FINAL + self.TIME_STEP, self.TIME_STEP)
             self.out_info["n_iterations"] = len(times) - 1
-            self.comm.barrier()
             for t_idx, (t_n, t_np1) in enumerate(zip(times[:-1], times[1:])):
 
                 self.iteration = t_idx
@@ -343,7 +342,6 @@ class TPFASolver:
         The prepocessing will include volume, area, centroid and normal_vector calculations
         """
         logger.info("Preprocessing mesh...", extra={"context": "Solver PREPROCESS"})
-        self.comm.barrier()
         point_coordinates = self.dmstag_manager.get_coordinates(SL.BACK_DOWN_LEFT, use_ghost=True)
 
         for face_stencil in [SL.LEFT, SL.BACK, SL.DOWN]:
@@ -456,7 +454,6 @@ class TPFASolver:
             face_stencil: np.empty((0, 2)) for face_stencil in [SL.LEFT, SL.BACK, SL.DOWN]
         }
 
-        self.comm.barrier()
         for face_stencil in [SL.LEFT, SL.BACK, SL.DOWN]:
             face_area = self.dmstag_manager.get_field("area", face_stencil)
             normal_vector = self.dmstag_manager.get_field("normal_vector", face_stencil)
@@ -687,7 +684,7 @@ class TPFASolver:
             f"Setting fluid transmissibility and formation volume factor...",
             extra={"context": f"Solver UPDATE [{self.iteration}]"},
         )
-        self.comm.barrier()
+
         pressure = self.dmstag_manager.get_field("pressure", SL.ELEMENT, use_ghost=True)
         for face_stencil in [SL.LEFT, SL.BACK, SL.DOWN]:
             logger.debug(
@@ -914,7 +911,7 @@ class TPFASolver:
         Solve the linear system Ax = b
         """
         logger.info("Solving the system...", extra={"context": f"Solver SOLVE [{self.iteration}]"})
-        self.comm.barrier()
+
         self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT, self.b)
         if self.x is None:
             self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
@@ -1047,7 +1044,6 @@ class TPFASolver:
                 f"Solver information exported to {dirname}/{filename}",
                 extra={"context": "Solver INFO"},
             )
-        self.comm.barrier()
 
     def __repr__(self):
         """Return a string representation of the TPFASolver."""
