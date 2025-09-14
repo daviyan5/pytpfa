@@ -24,7 +24,8 @@ dependencies = [
     "tabulate",
     "seaborn",
     "tqdm",
-    "psutil"
+    "psutil",
+    "pyyaml"
 ]
 
 [project.urls]
