@@ -166,6 +166,11 @@ class TPFASolver:
             "elem_transmissibility", 1, 3, is_shared=True
         )  # Transmissibility for the element
 
+        # Debug fields
+        if self.do_checks:
+            self.dmstag_manager.add_field("analytical_solution", 1, 3, is_shared=True)
+            self.dmstag_manager.add_field("error", 1, 3, is_shared=True)
+
         # Faces fields
         self.dmstag_manager.add_field("area", 1, 2)
         self.dmstag_manager.add_field("normal_vector", 3, 2)
@@ -644,7 +649,7 @@ class TPFASolver:
 
         self.ksp = PETSc.KSP().create()
         self.ksp.setType(PETSc.KSP.Type.GMRES)
-        self.ksp.getPC().setType(PETSc.PC.Type.HYPRE)
+        self.ksp.getPC().setType(PETSc.PC.Type.MG)
         self.ksp.setOperators(self.A)
         self.ksp.setFromOptions()
 
@@ -950,23 +955,32 @@ class TPFASolver:
             element_centroid[:, 2],
             time,
         )
+        self.dmstag_manager.set_field("analytical_solution", SL.ELEMENT, pressure_truth)
 
-        error_vector = pressure_sim - pressure_truth
+        error = pressure_sim - pressure_truth
+        self.dmstag_manager.set_field("error", SL.ELEMENT, error)
 
-        norm_truth_l1 = np.linalg.norm(pressure_truth, ord=1)
-        norm_truth_l2 = np.linalg.norm(pressure_truth, ord=2)
-        norm_truth_linf = np.linalg.norm(pressure_truth, ord=np.inf)
+        pressure_truth_vec = self.dmstag_manager.get_field_vec("analytical_solution", SL.ELEMENT)
+        error_vec = self.dmstag_manager.get_field_vec("error", SL.ELEMENT)
 
-        if norm_truth_l2 == 0:
+        norm_truth_l1 = pressure_truth_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_1)
+        norm_truth_l2 = pressure_truth_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_2)
+        norm_truth_linf = pressure_truth_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_INFINITY)
+
+        if norm_truth_l1 == 0 or norm_truth_l2 == 0 or norm_truth_linf == 0:
             logger.warning(
                 "Analytical solution norm is zero, cannot compute relative error.",
                 extra={"context": "Solver CHECK"},
             )
             return
 
-        l1_error = np.linalg.norm(error_vector, ord=1) / norm_truth_l1
-        l2_error = np.linalg.norm(error_vector, ord=2) / norm_truth_l2
-        linf_error = np.linalg.norm(error_vector, ord=np.inf) / norm_truth_linf
+        norm_error_l1 = error_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_1)
+        norm_error_l2 = error_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_2)
+        norm_error_linf = error_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_INFINITY)
+
+        l1_error = norm_error_l1 / norm_truth_l1
+        l2_error = norm_error_l2 / norm_truth_l2
+        linf_error = norm_error_linf / norm_truth_linf
 
         log_message = f"L1={l1_error:.4e}, L2={l2_error:.4e}, L_inf={linf_error:.4e}"
 

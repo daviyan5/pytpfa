@@ -11,3 +11,4 @@ test/meshfiles/*.h5
 *.bin
 *.info
 *.pkl
+*.json

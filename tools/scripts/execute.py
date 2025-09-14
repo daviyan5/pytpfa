@@ -16,7 +16,7 @@ import configparser
 import yaml
 from datetime import datetime
 
-OG_RESERVOIR_PATH = "../examples/example_Li/reservoir.ini"
+OG_RESERVOIR_PATHS = ["../examples/example_Li/reservoir.ini", "../examples/example_4/reservoir.ini"]
 RUN_PY_PATH = "../run.py"
 SIZES = [
     (32, 32, 1),
@@ -30,20 +30,38 @@ SIZES = [
     (8192, 4096, 1),
 ]
 
+MPI_MAX = 16
 SIZES.sort()
-SIZES = SIZES[::-1]  # Start with larger sizes for performance tests
+SIZES = SIZES[::-1]
 
-MPI_PROCESSES_STRONG = np.arange(1, 17, 1).tolist()
-MPI_PROCESSES_PERFORMANCE = [1, 2, 4, 8, 16]
+MPI_PROCESSES_STRONG = np.arange(1, MPI_MAX + 1, 1).tolist()
+MPI_PROCESSES_PERFORMANCE = [4**i for i in range(np.log2(MPI_MAX).astype(int) // 2 + 1)]
 
 
-def create_reservoir_ini(base_path: str, output_path: str, nx: int, ny: int, nz: int):
+def create_reservoir_ini(
+    base_path: str, output_path: str, nx: int, ny: int, nz: int, correctness: bool = False
+):
     config = configparser.ConfigParser()
     config.read(base_path)
+
+    original_size = (
+        config["RESERVOIR_INPUT"].getint("NX")
+        * config["RESERVOIR_INPUT"].getint("NY")
+        * config["RESERVOIR_INPUT"].getint("NZ")
+    )
+    new_size = nx * ny * nz
+
+    factor = new_size / original_size
 
     config["RESERVOIR_INPUT"]["NX"] = str(nx)
     config["RESERVOIR_INPUT"]["NY"] = str(ny)
     config["RESERVOIR_INPUT"]["NZ"] = str(nz)
+
+    if correctness:
+        # We must decrease the time step if we increase the number of elements
+        original_time_step = config["TIME_SETTINGS"].getfloat("TIME_STEP")
+        new_time_step = original_time_step / factor**2
+        config["TIME_SETTINGS"]["TIME_STEP"] = str(new_time_step)
 
     with open(output_path, "w") as f:
         config.write(f)
@@ -94,7 +112,9 @@ def monitor_memory_thread(pid: int, memory_data: Dict):
         memory_data["avg"] = 0
 
 
-def run_solver(reservoir_path: str, mpi_processes: int, name: str) -> Tuple[Dict, Dict]:
+def run_solver(
+    reservoir_path: str, mpi_processes: int, name: str, opt: bool = True
+) -> Tuple[Dict, Dict]:
     reservoir_path = os.path.abspath(reservoir_path)
     output_dir = Path(reservoir_path).parent / "output"
     if output_dir.exists():
@@ -114,16 +134,16 @@ def run_solver(reservoir_path: str, mpi_processes: int, name: str) -> Tuple[Dict
         name,
         "-reservoir",
         os.path.abspath(reservoir_path),
+        "-opt" if opt else "",
         "-ksp_type",
         "gmres",
         "-pc_type",
-        "hypre",
-        "-ksp_monitor",
+        "mg",
     ]
 
     memory_data = {}
 
-    process = subprocess.Popen(cmd, cwd=run_py_dir)
+    process = subprocess.Popen(cmd, cwd=run_py_dir, stdout=subprocess.PIPE)
 
     monitor_thread = threading.Thread(target=monitor_memory_thread, args=(process.pid, memory_data))
     monitor_thread.start()
@@ -147,48 +167,50 @@ def run_solver(reservoir_path: str, mpi_processes: int, name: str) -> Tuple[Dict
     return results, memory_data
 
 
-def test_correctness(temp_dir: Path):
+def test_correctness(temp_dir: Path, og_ini_path: Path):
     print("\n=== TESTE DE CORRETUDE ===")
 
     results_data = []
 
-    for nx, ny, nz in SIZES:
+    for nx, ny, nz in SIZES[1:]:
         total_size = nx * ny * nz
         print(f"Executando para tamanho {nx}x{ny}x{nz} = {total_size} elementos...")
 
         ini_path = temp_dir / f"reservoir_{total_size}.ini"
-        create_reservoir_ini(OG_RESERVOIR_PATH, str(ini_path), nx, ny, nz)
+        create_reservoir_ini(og_ini_path, str(ini_path), nx, ny, nz, correctness=True)
 
-        results, memory = run_solver(str(ini_path), 16, f"TPFA_Correct_{total_size}")
+        results, memory = run_solver(
+            str(ini_path), MPI_MAX, f"TPFA_Correct_{total_size}", opt=False
+        )
         if results:
             results_data.append(
                 {
                     "size": total_size,
                     "nx": nx,
-                    "l1_error": float(results["l1_error"][-1]),
-                    "l2_error": float(results["l2_error"][-1]),
-                    "linf_error": float(results["linf_error"][-1]),
+                    "l1_error": float(results["l1_error"][0]),
+                    "l2_error": float(results["l2_error"][0]),
+                    "linf_error": float(results["linf_error"][0]),
                 }
             )
 
     return results_data
 
 
-def test_strong_scaling(temp_dir: Path):
+def test_strong_scaling(temp_dir: Path, og_ini_path: Path):
     print("\n=== TESTE DE ESCALABILIDADE FORTE ===")
 
     nx, ny, nz = SIZES[1]
     total_size = nx * ny * nz
 
     ini_path = temp_dir / f"reservoir_strong_{total_size}.ini"
-    create_reservoir_ini(OG_RESERVOIR_PATH, str(ini_path), nx, ny, nz)
+    create_reservoir_ini(og_ini_path, str(ini_path), nx, ny, nz)
 
     results_data = []
 
     for mpi_procs in MPI_PROCESSES_STRONG:
         print(f"Executando com {mpi_procs} processos MPI...")
 
-        results, memory = run_solver(str(ini_path), mpi_procs, f"TPFA_Strong_{mpi_procs}")
+        results, memory = run_solver(str(ini_path), mpi_procs, f"TPFA_Strong_{mpi_procs}", opt=True)
 
         if results:
             results_data.append(
@@ -204,7 +226,7 @@ def test_strong_scaling(temp_dir: Path):
     return results_data
 
 
-def test_weak_scaling(temp_dir: Path):
+def test_weak_scaling(temp_dir: Path, og_ini_path: Path):
     print("\n=== TESTE DE ESCALABILIDADE FRACA ===")
 
     weak_configs = [
@@ -226,10 +248,10 @@ def test_weak_scaling(temp_dir: Path):
         )
 
         ini_path = temp_dir / f"reservoir_weak_{total_size}_{mpi_procs}.ini"
-        create_reservoir_ini(OG_RESERVOIR_PATH, str(ini_path), nx, ny, nz)
+        create_reservoir_ini(og_ini_path, str(ini_path), nx, ny, nz)
 
         results, memory = run_solver(
-            str(ini_path), mpi_procs, f"TPFA_Weak_{total_size}_{mpi_procs}"
+            str(ini_path), mpi_procs, f"TPFA_Weak_{total_size}_{mpi_procs}", opt=True
         )
 
         if results:
@@ -247,7 +269,7 @@ def test_weak_scaling(temp_dir: Path):
     return results_data
 
 
-def test_performance(temp_dir: Path):
+def test_performance(temp_dir: Path, og_ini_path: Path):
     print("\n=== TESTE DE DESEMPENHO ===")
 
     all_results = {mpi: [] for mpi in MPI_PROCESSES_PERFORMANCE}
@@ -256,13 +278,13 @@ def test_performance(temp_dir: Path):
         total_size = nx * ny * nz
 
         ini_path = temp_dir / f"reservoir_perf_{total_size}.ini"
-        create_reservoir_ini(OG_RESERVOIR_PATH, str(ini_path), nx, ny, nz)
+        create_reservoir_ini(og_ini_path, str(ini_path), nx, ny, nz)
 
         for mpi_procs in MPI_PROCESSES_PERFORMANCE:
             print(f"Executando {total_size} elementos com {mpi_procs} processos...")
 
             results, memory = run_solver(
-                str(ini_path), mpi_procs, f"TPFA_Perf_{total_size}_{mpi_procs}"
+                str(ini_path), mpi_procs, f"TPFA_Perf_{total_size}_{mpi_procs}", opt=True
             )
 
             if results:
@@ -285,62 +307,65 @@ def main():
     print("ANÁLISE DE DESEMPENHO DO TPFASOLVER")
     print("=" * 60)
 
-    global OG_RESERVOIR_PATH, RUN_PY_PATH
+    global OG_RESERVOIR_PATHS, RUN_PY_PATH
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    OG_RESERVOIR_PATH = os.path.abspath(os.path.join(script_dir, OG_RESERVOIR_PATH))
+    OG_RESERVOIR_PATHS = [
+        os.path.abspath(os.path.join(script_dir, og_ini_path)) for og_ini_path in OG_RESERVOIR_PATHS
+    ]
     RUN_PY_PATH = os.path.abspath(os.path.join(script_dir, RUN_PY_PATH))
 
-    case_name = os.path.basename(os.path.dirname(OG_RESERVOIR_PATH))
-    results_dir = os.path.join(script_dir, os.path.join("results", case_name))
-    os.makedirs(results_dir, exist_ok=True)
+    for og_ini_path in OG_RESERVOIR_PATHS:
+        case_name = os.path.basename(os.path.dirname(og_ini_path))
+        results_dir = os.path.join(script_dir, os.path.join("results", case_name))
+        os.makedirs(results_dir, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if not os.path.exists(OG_RESERVOIR_PATH):
-        print(f"Erro: Arquivo de configuração não encontrado: {OG_RESERVOIR_PATH}")
-        sys.exit(1)
-
-    run_py_abs = os.path.abspath(os.path.join(os.path.dirname(__file__), RUN_PY_PATH))
-    if not os.path.exists(run_py_abs):
-        print(f"Erro: Script run.py não encontrado: {run_py_abs}")
-        sys.exit(1)
-
-    with tempfile.TemporaryDirectory(prefix="INIS_", dir="/tmp") as temp_dir:
-        temp_path = Path(temp_dir)
-        print(f"Diretório temporário criado: {temp_path}")
-
-        try:
-            correctness_results = test_correctness(temp_path)
-            with open(os.path.join(results_dir, f"correctness_{timestamp}.yml"), "w") as f:
-                yaml.dump(correctness_results, f)
-
-            strong_scaling_results = test_strong_scaling(temp_path)
-            with open(os.path.join(results_dir, f"strong_scaling_{timestamp}.yml"), "w") as f:
-                yaml.dump(strong_scaling_results, f)
-
-            weak_scaling_results = test_weak_scaling(temp_path)
-            with open(os.path.join(results_dir, f"weak_scaling_{timestamp}.yml"), "w") as f:
-                yaml.dump(weak_scaling_results, f)
-
-            performance_results = test_performance(temp_path)
-            with open(os.path.join(results_dir, f"performance_{timestamp}.yml"), "w") as f:
-                yaml.dump(performance_results, f)
-
-            print("\n" + "=" * 60)
-            print("TESTES CONCLUÍDOS COM SUCESSO!")
-            print(f"Resultados salvos em: {results_dir}")
-            print(f"  - correctness_{timestamp}.yml")
-            print(f"  - strong_scaling_{timestamp}.yml")
-            print(f"  - weak_scaling_{timestamp}.yml")
-            print(f"  - performance_{timestamp}.yml")
-            print("=" * 60)
-
-        except Exception as e:
-            print(f"\nErro durante a execução: {e}")
-            import traceback
-
-            traceback.print_exc()
+        if not os.path.exists(og_ini_path):
+            print(f"Erro: Arquivo de configuração não encontrado: {og_ini_path}")
             sys.exit(1)
+
+        run_py_abs = os.path.abspath(os.path.join(os.path.dirname(__file__), RUN_PY_PATH))
+        if not os.path.exists(run_py_abs):
+            print(f"Erro: Script run.py não encontrado: {run_py_abs}")
+            sys.exit(1)
+
+        with tempfile.TemporaryDirectory(prefix="INIS_", dir="/tmp") as temp_dir:
+            temp_path = Path(temp_dir)
+            print(f"Diretório temporário criado: {temp_path}")
+
+            try:
+                correctness_results = test_correctness(temp_path, og_ini_path)
+                with open(os.path.join(results_dir, f"correctness_{timestamp}.yml"), "w") as f:
+                    yaml.dump(correctness_results, f)
+
+                strong_scaling_results = test_strong_scaling(temp_path, og_ini_path)
+                with open(os.path.join(results_dir, f"strong_scaling_{timestamp}.yml"), "w") as f:
+                    yaml.dump(strong_scaling_results, f)
+
+                weak_scaling_results = test_weak_scaling(temp_path, og_ini_path)
+                with open(os.path.join(results_dir, f"weak_scaling_{timestamp}.yml"), "w") as f:
+                    yaml.dump(weak_scaling_results, f)
+
+                performance_results = test_performance(temp_path, og_ini_path)
+                with open(os.path.join(results_dir, f"performance_{timestamp}.yml"), "w") as f:
+                    yaml.dump(performance_results, f)
+
+                print("\n" + "=" * 60)
+                print("TESTES CONCLUÍDOS COM SUCESSO!")
+                print(f"Resultados salvos em: {results_dir}")
+                print(f"  - correctness_{timestamp}.yml")
+                print(f"  - strong_scaling_{timestamp}.yml")
+                print(f"  - weak_scaling_{timestamp}.yml")
+                print(f"  - performance_{timestamp}.yml")
+                print("=" * 60)
+
+            except Exception as e:
+                print(f"\nErro durante a execução: {e}")
+                import traceback
+
+                traceback.print_exc()
+                sys.exit(1)
 
 
 if __name__ == "__main__":

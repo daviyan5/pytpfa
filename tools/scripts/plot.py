@@ -9,6 +9,31 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import seaborn as sns
+
+sns.set_style("whitegrid")
+plt.rcParams["figure.dpi"] = 100
+plt.rcParams["savefig.dpi"] = 300
+plt.rcParams["font.size"] = 10
+plt.rcParams["axes.labelsize"] = 11
+plt.rcParams["axes.titlesize"] = 12
+plt.rcParams["xtick.labelsize"] = 9
+plt.rcParams["ytick.labelsize"] = 9
+plt.rcParams["legend.fontsize"] = 9
+plt.rcParams["figure.titlesize"] = 14
+
+
+import os
+import sys
+import yaml
+from pathlib import Path
+from datetime import datetime
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import seaborn as sns
 
 sns.set_style("whitegrid")
@@ -27,7 +52,7 @@ def plot_correctness(data, output_path):
     if not data:
         return
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, ax = plt.subplots(figsize=(12, 8))
 
     sizes = [r["size"] for r in data]
     l1_errors = [r["l1_error"] for r in data]
@@ -64,7 +89,7 @@ def plot_strong_scaling(data, output_path):
     if not data:
         return
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
 
     mpi_procs = [r["mpi"] for r in data]
     times = [r["time"] for r in data]
@@ -95,8 +120,11 @@ def plot_strong_scaling(data, output_path):
     ax2.set_title("Escalabilidade Forte - Uso de Memória", fontsize=13, fontweight="bold")
     ax2.grid(True, alpha=0.3, axis="y")
 
+    ax2.yaxis.set_major_formatter(ticker.ScalarFormatter(useMathText=True))
+    ax2.ticklabel_format(style="scientific", axis="y", scilimits=(0, 0))
+
     for i, (m, mem) in enumerate(zip(mpi_procs, memory_max)):
-        ax2.text(i, mem, f"{mem:.1f}", ha="center", va="bottom", fontsize=9)
+        ax2.text(i, mem, f"{mem:.1e}", ha="center", va="bottom", fontsize=9)
 
     plt.suptitle(
         f"Análise de Escalabilidade Forte - {total_size} elementos",
@@ -104,6 +132,7 @@ def plot_strong_scaling(data, output_path):
         fontweight="bold",
         y=1.02,
     )
+    plt.subplots_adjust(wspace=0.3)
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
@@ -113,7 +142,7 @@ def plot_weak_scaling(data, output_path):
     if not data:
         return
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
 
     mpi_procs = [r["mpi"] for r in data]
     times = [r["time"] for r in data]
@@ -153,10 +182,14 @@ def plot_weak_scaling(data, output_path):
     ax2.set_title("Escalabilidade Fraca - Memória por Processo", fontsize=13, fontweight="bold")
     ax2.grid(True, alpha=0.3, axis="y")
 
+    ax2.yaxis.set_major_formatter(ticker.ScalarFormatter(useMathText=True))
+    ax2.ticklabel_format(style="scientific", axis="y", scilimits=(0, 0))
+
     for i, (m, mem) in enumerate(zip(mpi_procs, memory_per_proc)):
-        ax2.text(i, mem, f"{mem:.1f}", ha="center", va="bottom", fontsize=9)
+        ax2.text(i, mem, f"{mem:.1e}", ha="center", va="bottom", fontsize=9)
 
     plt.suptitle("Análise de Escalabilidade Fraca", fontsize=14, fontweight="bold", y=1.02)
+    plt.subplots_adjust(wspace=0.3)
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
@@ -169,7 +202,6 @@ def plot_performance(data, output_path):
     MPI_PROCESSES_PERFORMANCE = sorted(list(data.keys()))
     num_mpi_configs = len(MPI_PROCESSES_PERFORMANCE)
 
-    # Calculate global ranges for consistent scaling
     all_times = []
     all_memory = []
 
@@ -177,31 +209,26 @@ def plot_performance(data, output_path):
         proc_data = data[mpi_procs]
         if not proc_data:
             continue
-
-        # Collect all time values
         for d in proc_data:
             all_times.extend([d["preprocessing"], d["updating"], d["solving"]])
             all_memory.append(d["memory"])
 
-    # Calculate global ranges with small buffer for better visualization
     if all_times:
-        time_min = min(all_times) * 0.8
-        time_max = max(all_times) * 1.2
+        time_min, time_max = min(all_times) * 0.8, max(all_times) * 1.2
     else:
         time_min, time_max = 0.1, 100
 
     if all_memory:
-        memory_min = min(all_memory) * 0.8
-        memory_max = max(all_memory) * 1.2
+        memory_min, memory_max = min(all_memory) * 0.8, max(all_memory) * 1.2
     else:
         memory_min, memory_max = 1, 1000
 
     fig, axes = plt.subplots(
-        num_mpi_configs, 2, figsize=(14, 5 * num_mpi_configs), constrained_layout=True
+        2, num_mpi_configs, figsize=(7 * num_mpi_configs, 12), constrained_layout=False
     )
 
     if num_mpi_configs == 1:
-        axes = axes.reshape(1, -1)
+        axes = axes.reshape(2, 1)
 
     time_styles = {
         "preprocessing": {"color": "mediumseagreen", "marker": "o", "label": "Pré-processamento"},
@@ -209,15 +236,14 @@ def plot_performance(data, output_path):
         "solving": {"color": "cornflowerblue", "marker": "^", "label": "Solução"},
     }
 
-    for row, mpi_procs in enumerate(MPI_PROCESSES_PERFORMANCE):
-        proc_data = data[mpi_procs]
+    for col, mpi_procs in enumerate(MPI_PROCESSES_PERFORMANCE):
+        proc_data = data.get(mpi_procs, [])
         if not proc_data:
             continue
 
         sizes = [d["size"] for d in proc_data]
 
-        # Time plot
-        ax_time = axes[row, 0]
+        ax_time = axes[0, col]
         for time_key, style in time_styles.items():
             times = [d[time_key] for d in proc_data]
             ax_time.plot(
@@ -227,21 +253,19 @@ def plot_performance(data, output_path):
                 linestyle="-",
                 color=style["color"],
                 label=style["label"],
-                linewidth=2,
-                markersize=7,
+                linewidth=3,
+                markersize=8,
             )
-
         ax_time.set_title(f"Decomposição de Tempos (MPI={mpi_procs})", fontsize=12)
         ax_time.set_xlabel("Elementos", fontsize=11)
         ax_time.set_ylabel("Tempo (s)", fontsize=11)
         ax_time.grid(True, which="both", ls="--", alpha=0.4)
         ax_time.set_xscale("log")
         ax_time.set_yscale("log")
-        ax_time.set_ylim(time_min, time_max)  # Set consistent time scale
+        ax_time.set_ylim(time_min, time_max)
         ax_time.legend(title="Etapa do Processo")
 
-        # Memory plot
-        ax_mem = axes[row, 1]
+        ax_mem = axes[1, col]
         memory = [d["memory"] for d in proc_data]
         ax_mem.plot(
             sizes,
@@ -249,20 +273,23 @@ def plot_performance(data, output_path):
             marker="d",
             linestyle="-",
             color="palevioletred",
-            linewidth=2,
-            markersize=7,
+            linewidth=3,
+            markersize=8,
         )
-
         ax_mem.set_title(f"Memória Máxima (MPI={mpi_procs})", fontsize=12)
         ax_mem.set_xlabel("Elementos", fontsize=11)
         ax_mem.set_ylabel("Memória (MB)", fontsize=11)
         ax_mem.grid(True, which="both", ls="--", alpha=0.4)
         ax_mem.set_xscale("log")
         ax_mem.set_yscale("log")
-        ax_mem.set_ylim(memory_min, memory_max)  # Set consistent memory scale
+        ax_mem.set_ylim(memory_min, memory_max)
+        ax_mem.yaxis.set_major_formatter(ticker.ScalarFormatter(useMathText=True))
+        ax_mem.ticklabel_format(style="scientific", axis="y", scilimits=(0, 0))
 
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.subplots_adjust(wspace=0.3)
     plt.suptitle(
-        "Análise Detalhada de Desempenho - Tempos e Memória por Configuração MPI",
+        "Análise de Desempenho - Tempos e Memória por Configuração MPI",
         fontsize=16,
         fontweight="bold",
     )
@@ -274,7 +301,12 @@ def plot_performance(data, output_path):
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     results_dir = os.path.join(script_dir, "results")
+    cases = [d for d in os.listdir(results_dir) if os.path.isdir(os.path.join(results_dir, d))]
+    for case in cases:
+        process_case(os.path.join(results_dir, case))
 
+
+def process_case(results_dir):
     if not os.path.exists(results_dir):
         print(f"Erro: Diretório de resultados não encontrado: {results_dir}")
         sys.exit(1)
@@ -328,9 +360,9 @@ def main():
         with open(performance_file, "r") as f:
             data = yaml.safe_load(f)
         plot_performance(
-            data, os.path.join(results_dir, f"teste_desempenho_detalhado_{latest_timestamp}.png")
+            data, os.path.join(results_dir, f"teste_desempenho_{latest_timestamp}.png")
         )
-        print(f"Plotado: teste_desempenho_detalhado_{latest_timestamp}.png")
+        print(f"Plotado: teste_desempenho_{latest_timestamp}.png")
 
     print(f"\nGráficos salvos em: {results_dir}")
 

@@ -25,7 +25,7 @@ def parse_command_line_arguments():
     log_level = OptDB.getString("log_level", "INFO").upper()
 
     # New separated flags
-    opt_mode = OptDB.getBool("opt", True)
+    opt_mode = OptDB.getBool("opt", False)
     post_mode = OptDB.getBool("post", False)
     profile_mode = OptDB.getBool("profile", False)
 
