@@ -643,8 +643,8 @@ class TPFASolver:
         )
 
         self.ksp = PETSc.KSP().create()
-        self.ksp.setType(PETSc.KSP.Type.FGMRES)
-        self.ksp.getPC().setType(PETSc.PC.Type.MG)
+        self.ksp.setType(PETSc.KSP.Type.GMRES)
+        self.ksp.getPC().setType(PETSc.PC.Type.HYPRE)
         self.ksp.setOperators(self.A)
         self.ksp.setFromOptions()
 

@@ -19,12 +19,22 @@ from datetime import datetime
 OG_RESERVOIR_PATH = "../examples/example_Li/reservoir.ini"
 RUN_PY_PATH = "../run.py"
 SIZES = [
-    (64, 64, 1),
-    (128, 128, 1),
+    (32, 32, 1),
+    (64, 32, 1),
+    (128, 64, 1),
+    (256, 128, 1),
+    (512, 256, 1),
+    (1024, 512, 1),
+    (2048, 1024, 1),
+    (4096, 2048, 1),
+    (8192, 4096, 1),
 ]
 
-MPI_PROCESSES_STRONG = np.arange(1, 16, 1).tolist()
-MPI_PROCESSES_PERFORMANCE = [1, 8, 16]
+SIZES.sort()
+SIZES = SIZES[::-1]  # Start with larger sizes for performance tests
+
+MPI_PROCESSES_STRONG = np.arange(1, 17, 1).tolist()
+MPI_PROCESSES_PERFORMANCE = [1, 2, 4, 8, 16]
 
 
 def create_reservoir_ini(base_path: str, output_path: str, nx: int, ny: int, nz: int):
@@ -87,7 +97,6 @@ def monitor_memory_thread(pid: int, memory_data: Dict):
 def run_solver(reservoir_path: str, mpi_processes: int, name: str) -> Tuple[Dict, Dict]:
     reservoir_path = os.path.abspath(reservoir_path)
     output_dir = Path(reservoir_path).parent / "output"
-
     if output_dir.exists():
         shutil.rmtree(output_dir)
 
@@ -95,7 +104,6 @@ def run_solver(reservoir_path: str, mpi_processes: int, name: str) -> Tuple[Dict
 
     cmd = [
         "mpirun",
-        "--use-hwthread-cpus",
         "--bind-to",
         "core",
         "-n",
@@ -106,11 +114,16 @@ def run_solver(reservoir_path: str, mpi_processes: int, name: str) -> Tuple[Dict
         name,
         "-reservoir",
         os.path.abspath(reservoir_path),
+        "-ksp_type",
+        "gmres",
+        "-pc_type",
+        "hypre",
+        "-ksp_monitor",
     ]
 
     memory_data = {}
 
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=run_py_dir)
+    process = subprocess.Popen(cmd, cwd=run_py_dir)
 
     monitor_thread = threading.Thread(target=monitor_memory_thread, args=(process.pid, memory_data))
     monitor_thread.start()
@@ -164,7 +177,7 @@ def test_correctness(temp_dir: Path):
 def test_strong_scaling(temp_dir: Path):
     print("\n=== TESTE DE ESCALABILIDADE FORTE ===")
 
-    nx, ny, nz = SIZES[-1]
+    nx, ny, nz = SIZES[1]
     total_size = nx * ny * nz
 
     ini_path = temp_dir / f"reservoir_strong_{total_size}.ini"
@@ -195,11 +208,11 @@ def test_weak_scaling(temp_dir: Path):
     print("\n=== TESTE DE ESCALABILIDADE FRACA ===")
 
     weak_configs = [
-        ((8, 8, 1), 1),
-        ((16, 8, 1), 2),
-        ((16, 16, 1), 4),
-        ((32, 16, 1), 8),
-        ((32, 32, 1), 16),
+        ((128, 128, 1), 1),
+        ((256, 128, 1), 2),
+        ((256, 256, 1), 4),
+        ((512, 256, 1), 8),
+        ((512, 512, 1), 16),
     ]
 
     results_data = []
@@ -239,7 +252,7 @@ def test_performance(temp_dir: Path):
 
     all_results = {mpi: [] for mpi in MPI_PROCESSES_PERFORMANCE}
 
-    for nx, ny, nz in SIZES[:4]:
+    for nx, ny, nz in SIZES:
         total_size = nx * ny * nz
 
         ini_path = temp_dir / f"reservoir_perf_{total_size}.ini"
@@ -277,7 +290,8 @@ def main():
     OG_RESERVOIR_PATH = os.path.abspath(os.path.join(script_dir, OG_RESERVOIR_PATH))
     RUN_PY_PATH = os.path.abspath(os.path.join(script_dir, RUN_PY_PATH))
 
-    results_dir = os.path.join(script_dir, "results")
+    case_name = os.path.basename(os.path.dirname(OG_RESERVOIR_PATH))
+    results_dir = os.path.join(script_dir, os.path.join("results", case_name))
     os.makedirs(results_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

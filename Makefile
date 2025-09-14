@@ -3,7 +3,7 @@
 # --- Configurable Options ---
 MPI ?= 1
 DEBUG ?= no
-OPT ?= yes      # Use optimized flags (reuse preconditioner, skip checks)
+OPT ?= yes      # Use optimized flags (skip checks)
 POST ?= no      # Enable post-processing (VTK output)
 PROFILE ?= no   # Enable cProfile/line_profiler
 LIMIT ?= no     # Limit memory usage per process
@@ -52,8 +52,8 @@ endif
 
 # --- Command Definitions ---
 PYTHON_EXEC = python3 $(RUN_DIR)
-MPIRUN_CMD = mpirun --bind-to core --use-hwthread-cpus -n $(MPI)
-ALL_FLAGS = $(DEBUG_FLAG) $(OPT_FLAG) $(POST_FLAG) $(PROFILE_FLAG)
+MPIRUN_CMD = mpirun --bind-to core -n $(MPI)
+ALL_FLAGS = $(DEBUG_FLAG) $(OPT_FLAG) $(POST_FLAG) $(PROFILE_FLAG) -ksp_reuse_preconditioner true
 
 # --- Example Definitions ---
 EXAMPLE1_FLAGS = -name TPFA_Example1 -reservoir $(EXAMPLE_DIR)/example_1/reservoir.ini
@@ -127,7 +127,7 @@ help:
 	@echo "Options (can be set from the command line):"
 	@echo "  MPI=<n>      Set the number of MPI processes (default: 1)."
 	@echo "  DEBUG=<yes|no> Enable PETSc debug flags (default: no)."
-	@echo "  OPT=<yes|no>   Enable optimization (reuse preconditioner, skip checks) (default: yes)."
+	@echo "  OPT=<yes|no>   Enable optimization (skip checks) (default: yes)."
 	@echo "  POST=<yes|no>  Enable post-processing VTK output (default: no)."
 	@echo "  PROFILE=<yes|no> Enable performance profiling (default: no)."
 	@echo "  LIMIT=<yes|no> Limit memory usage per process (default: no)."

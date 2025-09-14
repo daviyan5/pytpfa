@@ -137,7 +137,7 @@ Options:
 
     DEBUG=<yes|no>: Enable PETSc debug flags (default: no).
 
-    OPT=<yes|no>: Enable optimization (reuse preconditioner, skip checks) (default: yes).
+    OPT=<yes|no>: Enable optimization (skip checks) (default: yes).
 
     POST=<yes|no>: Enable post-processing VTK output (default: no).
 

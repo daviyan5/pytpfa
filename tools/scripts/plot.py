@@ -37,7 +37,17 @@ def plot_correctness(data, output_path):
     ax.loglog(sizes, l1_errors, "o-", label="Norma L₁", linewidth=2, markersize=8)
     ax.loglog(sizes, l2_errors, "s-", label="Norma L₂", linewidth=2, markersize=8)
     ax.loglog(sizes, linf_errors, "^-", label="Norma L∞", linewidth=2, markersize=8)
+    minn = min(sizes)
+    minerr = min(min(l1_errors), min(l2_errors), min(linf_errors))
 
+    import numpy as np
+
+    ax.plot(
+        [minn, 10 * minn],
+        [minerr, minerr * np.exp((-2 / 3) * np.log(10))],
+        color="r",
+        label="O(n²)",
+    )
     ax.set_xlabel("Número de Elementos", fontsize=12)
     ax.set_ylabel("Erro Relativo", fontsize=12)
     ax.set_title("Análise de Convergência - Teste de Corretude", fontsize=14, fontweight="bold")
@@ -159,6 +169,33 @@ def plot_performance(data, output_path):
     MPI_PROCESSES_PERFORMANCE = sorted(list(data.keys()))
     num_mpi_configs = len(MPI_PROCESSES_PERFORMANCE)
 
+    # Calculate global ranges for consistent scaling
+    all_times = []
+    all_memory = []
+
+    for mpi_procs in MPI_PROCESSES_PERFORMANCE:
+        proc_data = data[mpi_procs]
+        if not proc_data:
+            continue
+
+        # Collect all time values
+        for d in proc_data:
+            all_times.extend([d["preprocessing"], d["updating"], d["solving"]])
+            all_memory.append(d["memory"])
+
+    # Calculate global ranges with small buffer for better visualization
+    if all_times:
+        time_min = min(all_times) * 0.8
+        time_max = max(all_times) * 1.2
+    else:
+        time_min, time_max = 0.1, 100
+
+    if all_memory:
+        memory_min = min(all_memory) * 0.8
+        memory_max = max(all_memory) * 1.2
+    else:
+        memory_min, memory_max = 1, 1000
+
     fig, axes = plt.subplots(
         num_mpi_configs, 2, figsize=(14, 5 * num_mpi_configs), constrained_layout=True
     )
@@ -179,8 +216,8 @@ def plot_performance(data, output_path):
 
         sizes = [d["size"] for d in proc_data]
 
+        # Time plot
         ax_time = axes[row, 0]
-
         for time_key, style in time_styles.items():
             times = [d[time_key] for d in proc_data]
             ax_time.plot(
@@ -200,8 +237,10 @@ def plot_performance(data, output_path):
         ax_time.grid(True, which="both", ls="--", alpha=0.4)
         ax_time.set_xscale("log")
         ax_time.set_yscale("log")
+        ax_time.set_ylim(time_min, time_max)  # Set consistent time scale
         ax_time.legend(title="Etapa do Processo")
 
+        # Memory plot
         ax_mem = axes[row, 1]
         memory = [d["memory"] for d in proc_data]
         ax_mem.plot(
@@ -220,12 +259,14 @@ def plot_performance(data, output_path):
         ax_mem.grid(True, which="both", ls="--", alpha=0.4)
         ax_mem.set_xscale("log")
         ax_mem.set_yscale("log")
+        ax_mem.set_ylim(memory_min, memory_max)  # Set consistent memory scale
 
     plt.suptitle(
         "Análise Detalhada de Desempenho - Tempos e Memória por Configuração MPI",
         fontsize=16,
         fontweight="bold",
     )
+
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
 

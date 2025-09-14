@@ -89,6 +89,7 @@ def run_simulation(config):
         simulation.solve(
             config["reservoir_path"],
             postprocess=config["post_mode"],
+            checks=not config["opt_mode"],
         )
         main_logger.info("Simulation completed successfully", extra={"context": "MAIN"})
 
