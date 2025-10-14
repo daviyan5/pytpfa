@@ -31,42 +31,61 @@ class DMStagManager:
             dim: The dimension of the DMStag object
         """
         self.dim = dim
+        self.dof_count = [1] * (self.dim + 1)
         self.fields = [[] for _ in range(self.dim + 1)]
         self.all_fields = set()
+        self.dof_map = {}
 
         self.connectivities = {}
         self.dmda_managers = {}
         self.dmstag = None
 
+        self.local_vec = None
+        self.global_vec = None
+
     def set_dm(self, dmstag):
         """Set the DMStag for this DMStagManager"""
-        if dmstag.getDof() != (1, 1, 1, 1):
-            raise ValueError("DMStagManager only supports DMStag with dof=(1,1,1,1)")
         self.dmstag = dmstag
         self.global_vec = dmstag.createGlobalVec()
+        self.local_vec = dmstag.createLocalVec()
 
     def add_field(self, name, size, cell_dim, is_shared=False):
         """
-        Add a field to the manager.
+        Add a field to the DOF manager.
         Parameters:
             name: Name of the field (e.g., 'velocity', 'pressure')
             size: Number of DOFs for this field
             cell_dim: Dimension of the cell (0=vertex, 1=edge, 2=face, 3=element)
-            is_shared: Whether the field is shared across processes (default: False)
         """
+        if self.dmstag is not None:
+            raise ValueError("Cannot add fields after DMStag is set. The mesh is already setup.")
+
         if cell_dim > self.dim:
             raise ValueError(f"Cell dimension {cell_dim} exceeds DMStag dimension {self.dim}")
 
         if name in self.all_fields:
             raise ValueError(f"Field {name} already exists.")
 
-        logger.debug(
-            f"Adding {"shared" if is_shared else "local"} field {name} with size {size}",
-            extra={"context": "DMSTAG"},
-        )
+        if is_shared:
+            logger.debug(
+                f"Adding shared field {name} with size {size} at index {self.dof_count[cell_dim]}",
+                extra={"context": "DMSTAG"},
+            )
+            self.dof_map[name] = {
+                "size": size,
+                "cell_dim": cell_dim,
+                "index": self.dof_count[cell_dim],
+            }
+            self.dof_count[cell_dim] += size
+        else:
+            logger.debug(f"Adding local field {name} with size {size}", extra={"context": "DMSTAG"})
 
         self.fields[cell_dim].append((name, size, is_shared))
         self.all_fields.add(name)
+
+    def get_dof_count(self):
+        """Return the current DOF count tuple"""
+        return tuple(self.dof_count)
 
     def _stencil_to_cell_dim(self, stencil_loc):
         """
@@ -142,7 +161,9 @@ class DMStagManager:
                 f"Creating DMDAManager for stencil_loc={_stencil_to_string(stencil_loc)} with {len(self.fields[cell_dim])} fields",
                 extra={"context": "DMSTAG"},
             )
-            dmda, vec_split = self.dmstag.VecSplitToDMDA(self.global_vec, stencil_loc, 0)
+            dmda, vec_split = self.dmstag.VecSplitToDMDA(
+                self.global_vec, stencil_loc, -self.dof_count[cell_dim]
+            )
             self.dmda_managers[key] = DMDAManager(
                 dmda,
                 _stencil_to_string(stencil_loc),
@@ -153,7 +174,7 @@ class DMStagManager:
             )
         return self.dmda_managers[key]
 
-    def set_field(self, name, stencil_loc, values, use_ghost=False, index=None):
+    def set_field(self, name, stencil_loc, values, use_ghost=False):
         """
         Set the local values for a field at a specific stencil location.
         Parameters:
@@ -161,8 +182,6 @@ class DMStagManager:
             stencil_loc: DMStag.StencilLocation to set values at
             values: Values to set (should match the size of the field)
             use_ghost: Whether to use the local vec indexing and set the local vec values.
-                       If true, will set all the values in the global vector to zero first.
-            index: If provided, sets the values at the specified indices.
 
         Notes:
         Automatically updates the global vector from the local vector after setting values.
@@ -174,16 +193,15 @@ class DMStagManager:
             raise KeyError(f"Field {name} does not exist.")
 
         dmda_manager = self._get_dmda_manager(stencil_loc)
-        dmda_manager.set_values(name, values, use_ghost, index)
+        dmda_manager.set_values(name, values, use_ghost)
 
-    def get_field(self, name, stencil_loc, use_ghost=False, index=None):
+    def get_field(self, name, stencil_loc, use_ghost=False):
         """
         Get the values for a field at a specific stencil location.
         Parameters:
             name: Field name
             stencil_loc: DMStag.StencilLocation to get values from
             use_ghost: Wheter to use the local vec indexing and return the local vec values
-            index: If provided, gets the values at the specified indices.
         Returns:
             if return_vec is True, returns the PETSc.Vec for the field at the stencil location.
             else, Numpy array of values for the field
@@ -195,14 +213,15 @@ class DMStagManager:
             raise KeyError(f"Field {name} does not exist.")
 
         dmda_manager = self._get_dmda_manager(stencil_loc)
-        return dmda_manager.get_values(name, use_ghost, index)
+        return dmda_manager.get_values(name, use_ghost)
 
-    def get_field_vec(self, name, stencil_loc):
+    def get_field_vec(self, name, stencil_loc, vec=None):
         """
         Get the field vector for a specific field and stencil location.
         Parameters:
             name: Field name
             stencil_loc: DMStag.StencilLocation to get the vector for
+            vec: Optional PETSc.Vec to use. If None, a new Vec will be created.
         Returns:
             PETSc.Vec for the specified field and stencil location
         """
@@ -213,7 +232,24 @@ class DMStagManager:
             raise KeyError(f"Field {name} does not exist.")
 
         dmda_manager = self._get_dmda_manager(stencil_loc)
-        return dmda_manager.get_vec(name)
+        return dmda_manager.get_vec(name, vec)
+
+    def restore_field_vec(self, name, stencil_loc, vec):
+        """
+        Restore the field vector after using it.
+        Parameters:
+            name: Field name
+            stencil_loc: DMStag.StencilLocation to restore the vector for
+            vec: The PETSc.Vec to restore
+        """
+        if self.dmstag is None:
+            raise ValueError("DMStag is not set. Call set_dm() first.")
+
+        if name not in self.all_fields:
+            raise KeyError(f"Field {name} does not exist.")
+
+        dmda_manager = self._get_dmda_manager(stencil_loc)
+        dmda_manager.restore_vec(name, vec)
 
     def get_coordinates(self, stencil_loc, use_ghost=False):
         """

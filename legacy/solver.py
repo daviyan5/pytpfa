@@ -48,12 +48,6 @@ class TPFASolver:
         # For boundary conditions
         self.matching_indices = {}
 
-        self.device = PETSc.Device.create()
-        logger.info(
-            f"Using device: {self.device.getDeviceType()}",
-            extra={"context": "Solver INIT"},
-        )
-
     def solve(self, reservoir_path, checks=True, postprocess=False):
         self.do_checks = checks
         self.comm = PETSc.COMM_WORLD
@@ -155,6 +149,9 @@ class TPFASolver:
         logger.info("Preparing fields for TPFASolver...", extra={"context": "Solver PREPROCESS"})
         self.dmstag_manager = DMStagManager(3)
 
+        # We won't use edges
+        self.dmstag_manager.dof_count[1] = 0
+
         # Element fields
         self.dmstag_manager.add_field("pressure", 1, 3, is_shared=True)
         self.dmstag_manager.add_field("volume", 1, 3)
@@ -195,12 +192,13 @@ class TPFASolver:
         self.out_info["n_elements"] = np.prod(reservoir_sizes)
         self.hx, self.hy, self.hz = reservoir_h
 
+        dof_count = self.dmstag_manager.get_dof_count()
         logger.debug(
-            f"Reservoir sizes: {reservoir_sizes}, length: {reservoir_length}, h: {reservoir_h}",
+            f"Reservoir sizes: {reservoir_sizes}, length: {reservoir_length}, h: {reservoir_h}, Dof count: {dof_count}",
             extra={"context": "Solver PREPROCESS"},
         )
         self.dmstag = create_3d_dmstag(
-            reservoir_sizes, reservoir_h, (1, 1, 1, 1), name=config.description.name, cache=True
+            reservoir_sizes, reservoir_h, dof_count, name=config.description.name, cache=True
         )
         self.dmstag_manager.set_dm(self.dmstag)
 
@@ -628,15 +626,6 @@ class TPFASolver:
         n_elems_global = self.dmstag_manager.get_count(SL.ELEMENT, is_global=True)
 
         self.A.setSizes([(n_elems, n_elems_global), (n_elems, n_elems_global)])
-
-        # If CUDA is available and the matrix may fit, use it
-        # Otherwise, default to AIJ
-
-        if self.device.getDeviceType().lower() == "cuda":
-            mat_type = "aijcusparse"
-        else:
-            mat_type = "aij"
-        self.A.setType(mat_type)
         self.A.setFromOptions()
 
         logger.debug(
@@ -805,24 +794,22 @@ class TPFASolver:
                     source_contribution = area_neu * trans_neu * bc_values
                     np.add.at(S_u, elements_to_update, source_contribution)
 
+        self.dmstag_manager.set_field("external_source", SL.ELEMENT, 0)
         self.dmstag_manager.set_field("external_source", SL.ELEMENT, S_u, use_ghost=True)
 
         if len(self.WELLS) == 0:
             return
 
-        well_contribuitions = []
-        local_indexes = []
+        S_u_local = self.dmstag_manager.get_field("external_source", SL.ELEMENT)
+
         for local_idx, well in self.well_indices:
             logger.debug(
                 f"Adding well source term for well {well["name"]} at index ({well["index"]})",
                 extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
             )
-            well_contribuitions.append(well["rate"] + well["J"] * well["pressure"])
-            local_indexes.append(local_idx)
+            S_u_local[local_idx] = well["rate"] + well["J"] * well["pressure"]
 
-        self.dmstag_manager.set_field(
-            "external_source", SL.ELEMENT, np.array(well_contribuitions), index=local_indexes
-        )
+        self.dmstag_manager.set_field("external_source", SL.ELEMENT, S_u_local)
 
     def assemble_system(self):
         """
@@ -891,6 +878,7 @@ class TPFASolver:
                         b_trans[matching_indices],
                     )
 
+        self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, 0)
         self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, Tp, use_ghost=True)
         Tp_temp = self.dmstag_manager.get_field("elem_transmissibility", SL.ELEMENT)
 
@@ -925,10 +913,13 @@ class TPFASolver:
         """
         logger.info("Solving the system...", extra={"context": f"Solver SOLVE [{self.iteration}]"})
 
-        self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT)
-        self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
-
+        self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT, self.b)
+        if self.x is None:
+            self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
+        else:
+            self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT, self.x)
         self.ksp.solve(self.b, self.x)
+        self.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, self.x)
 
     def check(self, time):
         """

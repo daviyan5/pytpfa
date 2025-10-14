@@ -159,8 +159,8 @@ class ReservoirINIParser:
             geom=section.get("GEOM"),
             prop=section.get("PROP"),
             fluid=section.get("FLUID"),
-            analytical=self._clean_string(section.get("ANALYTICAL", "None")),
-            reference=self._clean_string(section.get("REFERENCE", "None")),
+            analytical=self._clean_string(section.get("ANALYTICAL", None)),
+            reference=self._clean_string(section.get("REFERENCE", None)),
         )
 
     def _parse_input(self) -> ReservoirInput:
