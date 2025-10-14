@@ -15,28 +15,61 @@ from typing import List, Tuple, Dict
 import configparser
 import yaml
 from datetime import datetime
+import argparse
 
 OG_RESERVOIR_PATHS = ["../examples/example_Li/reservoir.ini", "../examples/example_4/reservoir.ini"]
 RUN_PY_PATH = "../run.py"
-SIZES = [
-    (32, 32, 1),
-    (64, 32, 1),
-    (128, 64, 1),
-    (256, 128, 1),
-    (512, 256, 1),
-    (1024, 512, 1),
-    # (2048, 1024, 1),
-    # (4096, 2048, 1),
-    # (8192, 4096, 1),
-]
 
-MPI_MAX = 16
-SIZES.sort()
-SIZES = SIZES[::-1]
 
-MPI_PROCESSES_STRONG = np.arange(1, MPI_MAX + 1, 1).tolist()
-MPI_PROCESSES_PERFORMANCE = [4**i for i in range(np.log2(MPI_MAX).astype(int) // 2 + 1)]
-# MPI_PROCESSES_PERFORMANCE = [1, 2, 4, 6, 8]
+def generate_sizes(max_elements):
+    sizes = []
+
+    max_n = int(np.sqrt(max_elements))
+    ratio = np.sqrt(1.5)
+    cur_n = max_n
+    while cur_n >= 32:
+        n = int(cur_n)
+        if n < 32:
+            n = 32
+        sizes.append((n, n, 1))
+        cur_n /= ratio
+    sizes = list(set(sizes))
+    sizes.sort(key=lambda x: x[0] * x[1] * x[2], reverse=True)
+    return sizes
+
+
+def generate_mpi_processes_strong(max_mpi):
+    return list(range(1, max_mpi + 1))
+
+
+def generate_mpi_processes_performance(max_mpi):
+    processes = [1]
+    i = 2
+    while i <= max_mpi:
+        processes.append(i)
+        i *= 2
+    if max_mpi not in processes and max_mpi > 1:
+        processes.append(max_mpi)
+    return sorted(processes)
+
+
+def generate_weak_configs(max_elements, max_mpi):
+    configs = []
+    base_size = max_elements // max_mpi
+
+    for mpi in range(1, max_mpi + 1):
+        target_total = min(base_size * mpi, max_elements)
+        n = int(np.sqrt(target_total))
+        if n < 32:
+            n = 32
+        nx = n
+        ny = n if mpi > 1 else n
+        nz = 1
+
+        if nx * ny * nz <= max_elements:
+            configs.append(((nx, ny, nz), mpi))
+
+    return configs
 
 
 def create_reservoir_ini(
@@ -152,6 +185,7 @@ def run_solver(
         "gmres",
         "-pc_type",
         "hypre",
+        "-profile",
     ]
 
     memory_data = {}
@@ -180,21 +214,23 @@ def run_solver(
     return results, memory_data
 
 
-def test_correctness(temp_dir: Path, og_ini_path: Path):
+def test_correctness(temp_dir: Path, og_ini_path: Path, sizes: List):
     print("\n=== TESTE DE CORRETUDE ===")
 
     results_data = []
 
-    for nx, ny, nz in SIZES[1:]:
+    test_sizes = sizes
+
+    for nx, ny, nz in test_sizes:
         total_size = nx * ny * nz
+        if total_size > 1e6:
+            continue
         print(f"Executando para tamanho {nx}x{ny}x{nz} = {total_size} elementos...")
 
         ini_path = temp_dir / f"reservoir_{total_size}.ini"
         create_reservoir_ini(og_ini_path, str(ini_path), nx, ny, nz, correctness=True)
 
-        results, memory = run_solver(
-            str(ini_path), MPI_MAX, f"TPFA_Correct_{total_size}", opt=False
-        )
+        results, memory = run_solver(str(ini_path), 1, f"TPFA_Correct_{total_size}", opt=False)
         if results:
             results_data.append(
                 {
@@ -209,10 +245,10 @@ def test_correctness(temp_dir: Path, og_ini_path: Path):
     return results_data
 
 
-def test_strong_scaling(temp_dir: Path, og_ini_path: Path):
+def test_strong_scaling(temp_dir: Path, og_ini_path: Path, sizes: List, mpi_processes_strong: List):
     print("\n=== TESTE DE ESCALABILIDADE FORTE ===")
 
-    nx, ny, nz = SIZES[1]
+    nx, ny, nz = sizes[np.argmax(np.prod(sizes, axis=1))]
     total_size = nx * ny * nz
 
     ini_path = temp_dir / f"reservoir_strong_{total_size}.ini"
@@ -220,7 +256,7 @@ def test_strong_scaling(temp_dir: Path, og_ini_path: Path):
 
     results_data = []
 
-    for mpi_procs in MPI_PROCESSES_STRONG:
+    for mpi_procs in mpi_processes_strong:
         print(f"Executando com {mpi_procs} processos MPI...")
 
         results, memory = run_solver(str(ini_path), mpi_procs, f"TPFA_Strong_{mpi_procs}", opt=True)
@@ -242,16 +278,8 @@ def test_strong_scaling(temp_dir: Path, og_ini_path: Path):
     return results_data
 
 
-def test_weak_scaling(temp_dir: Path, og_ini_path: Path):
+def test_weak_scaling(temp_dir: Path, og_ini_path: Path, weak_configs: List):
     print("\n=== TESTE DE ESCALABILIDADE FRACA ===")
-
-    weak_configs = [
-        ((32, 32, 1), 1),
-        ((64, 32, 1), 2),
-        ((64, 64, 1), 4),
-        ((128, 64, 1), 8),
-        # ((512, 512, 1), 16),
-    ]
 
     results_data = []
 
@@ -288,20 +316,23 @@ def test_weak_scaling(temp_dir: Path, og_ini_path: Path):
     return results_data
 
 
-def test_performance(temp_dir: Path, og_ini_path: Path):
+def test_performance(
+    temp_dir: Path, og_ini_path: Path, sizes: List, mpi_processes_performance: List
+):
     print("\n=== TESTE DE DESEMPENHO ===")
 
-    all_results = {mpi: [] for mpi in MPI_PROCESSES_PERFORMANCE}
+    all_results = {mpi: [] for mpi in mpi_processes_performance}
 
-    for i, (nx, ny, nz) in enumerate(SIZES):
+    for i, (nx, ny, nz) in enumerate(sizes):
         total_size = nx * ny * nz
 
         ini_path = temp_dir / f"reservoir_perf_{total_size}.ini"
         create_reservoir_ini(og_ini_path, str(ini_path), nx, ny, nz)
 
-        for mpi_procs in MPI_PROCESSES_PERFORMANCE:
-            if i <= 1 and mpi_procs == 1:
-                continue  # Too big for 1 process
+        for mpi_procs in mpi_processes_performance:
+            if total_size > 500000 and mpi_procs == 1:
+                continue
+
             print(f"Executando {total_size} elementos com {mpi_procs} processos...")
 
             results, memory = run_solver(
@@ -324,9 +355,31 @@ def test_performance(temp_dir: Path, og_ini_path: Path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Performance analysis for TPFASolver")
+    parser.add_argument(
+        "--max-elements",
+        type=int,
+        default=int(3e6),
+        help="Maximum number of elements for testing",
+    )
+    parser.add_argument("--max-mpi", type=int, default=6, help="Maximum number of MPI processes")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("ANÁLISE DE DESEMPENHO DO TPFASOLVER")
+    print(f"Max elements: {args.max_elements}")
+    print(f"Max MPI processes: {args.max_mpi}")
     print("=" * 60)
+
+    sizes = generate_sizes(args.max_elements)
+    mpi_processes_strong = generate_mpi_processes_strong(args.max_mpi)
+    mpi_processes_performance = generate_mpi_processes_performance(args.max_mpi)
+    weak_configs = generate_weak_configs(args.max_elements, args.max_mpi)
+
+    print(f"\nGenerated sizes: {sizes}")
+    print(f"Strong scaling MPI: {mpi_processes_strong}")
+    print(f"Performance MPI: {mpi_processes_performance}")
+    print(f"Weak configs: {weak_configs}")
 
     global OG_RESERVOIR_PATHS, RUN_PY_PATH
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -356,19 +409,23 @@ def main():
             print(f"Diretório temporário criado: {temp_path}")
 
             try:
-                correctness_results = test_correctness(temp_path, og_ini_path)
+                correctness_results = test_correctness(temp_path, og_ini_path, sizes)
                 with open(os.path.join(results_dir, f"correctness_{timestamp}.yml"), "w") as f:
                     yaml.dump(correctness_results, f)
 
-                strong_scaling_results = test_strong_scaling(temp_path, og_ini_path)
+                strong_scaling_results = test_strong_scaling(
+                    temp_path, og_ini_path, sizes, mpi_processes_strong
+                )
                 with open(os.path.join(results_dir, f"strong_scaling_{timestamp}.yml"), "w") as f:
                     yaml.dump(strong_scaling_results, f)
 
-                weak_scaling_results = test_weak_scaling(temp_path, og_ini_path)
+                weak_scaling_results = test_weak_scaling(temp_path, og_ini_path, weak_configs)
                 with open(os.path.join(results_dir, f"weak_scaling_{timestamp}.yml"), "w") as f:
                     yaml.dump(weak_scaling_results, f)
 
-                performance_results = test_performance(temp_path, og_ini_path)
+                performance_results = test_performance(
+                    temp_path, og_ini_path, sizes, mpi_processes_performance
+                )
                 with open(os.path.join(results_dir, f"performance_{timestamp}.yml"), "w") as f:
                     yaml.dump(performance_results, f)
 
