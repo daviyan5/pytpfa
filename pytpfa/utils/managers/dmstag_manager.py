@@ -45,7 +45,7 @@ class DMStagManager:
         self.dmstag = dmstag
         self.global_vec = dmstag.createGlobalVec()
 
-    def add_field(self, name, size, cell_dim, is_shared=False):
+    def add_field(self, name, size, cell_dim, is_shared=False, gpu=False):
         """
         Add a field to the manager.
         Parameters:
@@ -53,6 +53,7 @@ class DMStagManager:
             size: Number of DOFs for this field
             cell_dim: Dimension of the cell (0=vertex, 1=edge, 2=face, 3=element)
             is_shared: Whether the field is shared across processes (default: False)
+            gpu: Will allocate the vectors on GPU if True and PETSc is configured with CUDA (default: False)
         """
         if cell_dim > self.dim:
             raise ValueError(f"Cell dimension {cell_dim} exceeds DMStag dimension {self.dim}")
@@ -61,11 +62,11 @@ class DMStagManager:
             raise ValueError(f"Field {name} already exists.")
 
         logger.debug(
-            f"Adding {"shared" if is_shared else "local"} field {name} with size {size}",
+            f"Adding {"shared" if is_shared else "local"} field {name} with size {size} on {"gpu" if gpu else "cpu"} at cell_dim {cell_dim}",
             extra={"context": "DMSTAG"},
         )
 
-        self.fields[cell_dim].append((name, size, is_shared))
+        self.fields[cell_dim].append((name, size, is_shared, gpu))
         self.all_fields.add(name)
 
     def _stencil_to_cell_dim(self, stencil_loc):

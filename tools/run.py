@@ -43,6 +43,7 @@ def parse_command_line_arguments():
         "log_level": log_level,
         "opt_mode": opt_mode,
         "post_mode": post_mode,
+        "gpu_mode": OptDB.getBool("gpu", False),
         "profile_mode": profile_mode,
         "petsc_opts": petsc_opts,
     }
@@ -60,7 +61,7 @@ def run_simulation(config):
     main_logger.info(f"Starting {config['name']} simulation", extra={"context": "MAIN"})
     main_logger.info(f"Reservoir path: {config['reservoir_path']}", extra={"context": "MAIN"})
     main_logger.info(
-        f"Running with options: OPT={config['opt_mode']}, POST={config['post_mode']}, PROFILE={config['profile_mode']}",
+        f"Running with options: OPT={config['opt_mode']}, POST={config['post_mode']}, PROFILE={config['profile_mode']}, GPU={config['gpu_mode']}",
         extra={"context": "MAIN"},
     )
 
@@ -90,6 +91,7 @@ def run_simulation(config):
             config["reservoir_path"],
             postprocess=config["post_mode"],
             checks=not config["opt_mode"],
+            use_gpu=config["gpu_mode"],
         )
         main_logger.info("Simulation completed successfully", extra={"context": "MAIN"})
 

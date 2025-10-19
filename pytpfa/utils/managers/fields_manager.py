@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class FieldsManager:
-    def __init__(self, name, size, is_shared, cell_info):
+    def __init__(self, name, size, is_shared, gpu, cell_info):
         """
         Initialize a field with a name, size, type and shared status.
         """
@@ -34,6 +34,10 @@ class FieldsManager:
                 gvec = global_vec.duplicate()
                 lvec = local_vec.duplicate()
                 gvec.setName(f"{name}_{dof}")
+
+                if gpu:
+                    gvec.setType("mpicuda")
+                    lvec.setType("mpicuda")
 
                 self.gvecs.append(gvec)
                 self.lvecs.append(lvec)

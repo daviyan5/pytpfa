@@ -54,8 +54,9 @@ class TPFASolver:
             extra={"context": "Solver INIT"},
         )
 
-    def solve(self, reservoir_path, checks=True, postprocess=False):
+    def solve(self, reservoir_path, checks=True, postprocess=False, use_gpu=False):
         self.do_checks = checks
+        self.use_gpu = self.device.getDeviceType() == "CUDA" and use_gpu
         self.comm = PETSc.COMM_WORLD
         self.rank = PETSc.COMM_WORLD.getRank()
         self.out_info["rank"] = self.rank
@@ -90,6 +91,8 @@ class TPFASolver:
 
             times = np.arange(self.TIME_INITIAL, self.TIME_FINAL + self.TIME_STEP, self.TIME_STEP)
             self.out_info["n_iterations"] = len(times) - 1
+            self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT)
+            self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
             for t_idx, (t_n, t_np1) in enumerate(zip(times[:-1], times[1:])):
 
                 self.iteration = t_idx
@@ -156,14 +159,16 @@ class TPFASolver:
         self.dmstag_manager = DMStagManager(3)
 
         # Element fields
-        self.dmstag_manager.add_field("pressure", 1, 3, is_shared=True)
+        self.dmstag_manager.add_field("pressure", 1, 3, is_shared=True, gpu=self.use_gpu)
         self.dmstag_manager.add_field("volume", 1, 3)
         self.dmstag_manager.add_field("permeability", 3, 3, is_shared=True)  # K
         self.dmstag_manager.add_field("porosity", 1, 3)  # φ
         self.dmstag_manager.add_field("formation_factor", 1, 3)  # B
         self.dmstag_manager.add_field("accumulation_coefficient", 1, 3)  # Gamma
         self.dmstag_manager.add_field("external_source", 1, 3, is_shared=True)  # S_u
-        self.dmstag_manager.add_field("rhs", 1, 3, is_shared=True)  # Right-hand side vector
+        self.dmstag_manager.add_field(
+            "rhs", 1, 3, is_shared=True, gpu=self.use_gpu
+        )  # Right-hand side vector
         self.dmstag_manager.add_field(
             "elem_transmissibility", 1, 3, is_shared=True
         )  # Transmissibility for the element
@@ -628,15 +633,6 @@ class TPFASolver:
         n_elems_global = self.dmstag_manager.get_count(SL.ELEMENT, is_global=True)
 
         self.A.setSizes([(n_elems, n_elems_global), (n_elems, n_elems_global)])
-
-        # If CUDA is available and the matrix may fit, use it
-        # Otherwise, default to AIJ
-
-        if self.device.getDeviceType().lower() == "cuda":
-            mat_type = "aijcusparse"
-        else:
-            mat_type = "aij"
-        self.A.setType(mat_type)
         self.A.setFromOptions()
 
         logger.debug(
@@ -656,9 +652,9 @@ class TPFASolver:
         )
 
         self.ksp = PETSc.KSP().create()
-        self.ksp.setType(PETSc.KSP.Type.GMRES)
+        self.ksp.setType(PETSc.KSP.Type.FGMRES)
         self.ksp.getPC().setType(PETSc.PC.Type.BJACOBI)
-        self.ksp.setTolerances(rtol=1e-8)
+        # self.ksp.setTolerances(rtol=1e-5, max_it=1000)
         self.ksp.setOperators(self.A)
         self.ksp.setFromOptions()
 
@@ -841,7 +837,7 @@ class TPFASolver:
         pressure = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
 
         b = -(S_u + gamma * pressure / self.TIME_STEP)
-        self.dmstag_manager.set_field("rhs", SL.ELEMENT, b)
+        self.b.setArray(b)
 
         Tp = np.zeros(self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)).flatten()
 
@@ -924,10 +920,6 @@ class TPFASolver:
         Solve the linear system Ax = b
         """
         logger.info("Solving the system...", extra={"context": f"Solver SOLVE [{self.iteration}]"})
-
-        self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT)
-        self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
-
         self.ksp.solve(self.b, self.x)
 
     def check(self, time):

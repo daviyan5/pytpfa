@@ -58,7 +58,7 @@ class DMDAManager:
 
         self.fields = {}
 
-        for name, size, is_shared in fields:
+        for name, size, is_shared, gpu in fields:
             cell_info = (
                 self.get_count(),
                 self.get_ghost_count(),
@@ -67,7 +67,7 @@ class DMDAManager:
                 self.global_vec,
                 self.local_vec,
             )
-            field = FieldsManager(name, size, is_shared, cell_info)
+            field = FieldsManager(name, size, is_shared, gpu, cell_info)
             self.fields[name] = field
 
         logger.debug(

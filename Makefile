@@ -7,6 +7,7 @@ OPT ?= yes      # Use optimized flags (skip checks)
 POST ?= no      # Enable post-processing (VTK output)
 PROFILE ?= no   # Enable cProfile/line_profiler
 LIMIT ?= no     # Limit memory usage per process
+GPU ?= yes       # Enable GPU support (requires CUDA and PETSc with GPU support)
 
 # --- Project Paths ---
 SCRIPT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -35,9 +36,15 @@ else
 endif
 
 ifeq ($(OPT),yes)
-    OPT_FLAG = -opt -mat_type aijcusparse
+    OPT_FLAG = -opt
 else
     OPT_FLAG =
+endif
+
+ifeq ($(GPU),yes)
+	GPU_FLAG = -gpu -mat_type aijcusparse
+else
+	GPU_FLAG =
 endif
 
 ifeq ($(POST),yes)
@@ -56,9 +63,14 @@ endif
 PYTHON_EXEC = python3 $(RUN_DIR)
 
 EXPORT_CMD = export OMP_NUM_THREADS=1 && export OMP_PROC_BIND=close && export OMP_PLACES=cores && export PETSC_ARCH=myconfigureopt
+GPU_EXPORT_CMD = export CUDA_VISIBLE_DEVICES=0
+ifeq ($(GPU),yes)
+	EXPORT_CMD := $(EXPORT_CMD) && $(GPU_EXPORT_CMD)
+endif
 MPIRUN_CMD = $(EXPORT_CMD) && mpirun --bind-to core -n $(MPI)
-KSP_FLAGS = -ksp_type gmres -pc_type bjacobi -ksp_reuse_preconditioner true
-ALL_FLAGS = $(DEBUG_FLAG) $(OPT_FLAG) $(POST_FLAG) $(PROFILE_FLAG) $(KSP_FLAGS)
+KSP_FLAGS = -ksp_type fgmres -pc_type gamg -ksp_reuse_preconditioner true
+HYPRE_FLAGS = -pc_hypre euclid -pc_hypre_boomeramg_trunc_factor 0.1 -pc_hypre_boomeramg_coarsen_type HMIS -pc_hypre_boomeramg_max_levels 10
+ALL_FLAGS = $(DEBUG_FLAG) $(OPT_FLAG) $(POST_FLAG) $(PROFILE_FLAG) $(KSP_FLAGS) $(GPU_FLAG)
 
 # --- Example Definitions ---
 EXAMPLE1_FLAGS = -name TPFA_Example1 -reservoir $(EXAMPLE_DIR)/example_1/reservoir.ini
@@ -73,6 +85,10 @@ EXAMPLES = example1 example2 example3 example4
 .PHONY: all $(EXAMPLES) help clean compare_li test test_gpu
 
 all: $(EXAMPLES)
+# --- Prepare GPU ---
+prepare_gpu:
+	@echo "Preparing GPU for exclusive process mode and starting MPS daemon..."
+	@sudo nvidia-smi -i 0 -c EXCLUSIVE_PROCESS && sudo nvidia-cuda-mps-control -d
 
 # --- Main Targets ---
 example1:
@@ -98,12 +114,15 @@ example_li:
 test_gpu:
 	@echo "Running GPU benchmark for 1 to 6 MPI processes..."
 	@mkdir -p $(RESULTS_DIR)
-	@for i in $$(seq 1 6); do \
+	@for i in $$(seq 6 -1 1); do \
 		echo "--- Running with $$i process(es) ---"; \
 		$(EXPORT_CMD) && mpirun --bind-to core -n $$i \
 			python3 $(TEST_GPU_SCRIPT) \
 			--output-dir $(RESULTS_DIR) \
-			--mpi-procs $$i; \
+			--mpi-procs $$i \
+			-log_view \
+			-dm_mat_type hypre -dm_vec_type mpicuda; \
+
 	done
 	@echo "GPU benchmark finished. Results are in $(RESULTS_DIR)"
 

@@ -154,29 +154,29 @@ def run_benchmark(problem_size):
         PC_TYPES_BASE = ["jacobi", "bjacobi", "asm"]
 
     scenarios = {
-        "1. All CPU": {
-            "mat_type": "aij",
+        "1. All GPU": {
+            "mat_type": "aijcusparse",
+            "b_type": "cuda",
+            "x_type": "cuda",
+            "use_hypre": True,
+        },
+        "2. A,b on GPU": {
+            "mat_type": "aijcusparse",
+            "b_type": "cuda",
+            "x_type": "standard",
+            "use_hypre": True,
+        },
+        "3. A on GPU": {
+            "mat_type": "aijcusparse",
             "b_type": "standard",
             "x_type": "standard",
             "use_hypre": True,
         },
-        "2. A on GPU": {
-            "mat_type": "aijcusparse",
+        "4. All CPU": {
+            "mat_type": "aij",
             "b_type": "standard",
             "x_type": "standard",
-            "use_hypre": False,
-        },
-        "3. A,b on GPU": {
-            "mat_type": "aijcusparse",
-            "b_type": "cuda",
-            "x_type": "standard",
-            "use_hypre": False,
-        },
-        "4. All GPU": {
-            "mat_type": "aijcusparse",
-            "b_type": "cuda",
-            "x_type": "cuda",
-            "use_hypre": False,
+            "use_hypre": True,
         },
     }
 
@@ -247,7 +247,7 @@ def run_benchmark(problem_size):
                         pc.setFromOptions()
                         pc.setHYPREType("boomeramg")
 
-                    ksp.setTolerances(rtol=1e-7, max_it=2000)
+                    # ksp.setTolerances(rtol=1e-5, max_it=50000)
                     ksp.setFromOptions()
 
                     x.set(0.0)
@@ -318,11 +318,10 @@ def run_benchmark(problem_size):
 
 
 def create_summary_plot(df, output_dir, mpi_procs, problem_size):
-    """Create comprehensive summary visualization"""
     fig = plt.figure(figsize=(22, 14))
     gs = fig.add_gridspec(4, 2, hspace=0.35, wspace=0.3)
 
-    scenarios = ["1. All CPU", "2. A on GPU", "3. A,b on GPU", "4. All GPU"]
+    scenarios = ["1. All GPU", "2. A,b on GPU", "3. A on GPU", "4. All CPU"]
     colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"]
 
     best_results = []
@@ -366,11 +365,11 @@ def create_summary_plot(df, output_dir, mpi_procs, problem_size):
     # Plot 2: Speedup analysis
     ax3 = fig.add_subplot(gs[1, :])
     speedup_data = []
-    cpu_subset = df[df["Scenario"] == "1. All CPU"]
+    cpu_subset = df[df["Scenario"] == "4. All CPU"]
     if len(cpu_subset) > 0:
         cpu_best = cpu_subset["Solve Time (s)"].min()
 
-        for scenario in scenarios[1:]:
+        for scenario in scenarios[:3]:
             subset = df[df["Scenario"] == scenario]
             if len(subset) > 0:
                 gpu_best = subset["Solve Time (s)"].min()
@@ -382,7 +381,7 @@ def create_summary_plot(df, output_dir, mpi_procs, problem_size):
             bars = ax3.bar(
                 speedup_df["Scenario"],
                 speedup_df["Speedup"],
-                color=colors[1 : len(speedup_data) + 1],
+                color=colors[: len(speedup_data)],
                 edgecolor="black",
                 linewidth=1.5,
             )
@@ -400,8 +399,10 @@ def create_summary_plot(df, output_dir, mpi_procs, problem_size):
                     fontweight="bold",
                 )
 
-            ax3.set_ylabel("Speedup Factor", fontsize=12, fontweight="bold")
-            ax3.set_title("GPU Speedup vs CPU (Best Solvers)", fontsize=12, fontweight="bold")
+            ax3.set_ylabel("Speedup Factor", fontsize=12, fontweight="bold", labelpad=10)
+            ax3.set_title(
+                "GPU Speedup vs CPU (Best Solvers)", fontsize=12, fontweight="bold", pad=20
+            )
             ax3.legend()
             ax3.grid(True, alpha=0.3, axis="y")
 
@@ -444,8 +445,8 @@ def create_summary_plot(df, output_dir, mpi_procs, problem_size):
             linewidth=1,
         )
 
-        ax4.set_ylabel("Time (seconds)", fontsize=12, fontweight="bold")
-        ax4.set_title("Setup vs Solve Time (Best Solvers)", fontsize=12, fontweight="bold")
+        ax4.set_ylabel("Time (seconds)", fontsize=12, fontweight="bold", labelpad=10)
+        ax4.set_title("Setup vs Solve Time (Best Solvers)", fontsize=12, fontweight="bold", pad=20)
         ax4.set_xticks(x)
         ax4.set_xticklabels(comp_df["Scenario"])
         ax4.legend()
@@ -490,8 +491,8 @@ def create_summary_plot(df, output_dir, mpi_procs, problem_size):
             linewidth=1,
         )
 
-        ax5.set_ylabel("VRAM Usage (MB)", fontsize=12, fontweight="bold")
-        ax5.set_title("VRAM Memory Usage (Best Solvers)", fontsize=12, fontweight="bold")
+        ax5.set_ylabel("VRAM Usage (MB)", fontsize=12, fontweight="bold", labelpad=10)
+        ax5.set_title("VRAM Memory Usage (Best Solvers)", fontsize=12, fontweight="bold", pad=20)
         ax5.set_xticks(x)
         ax5.set_xticklabels(vram_df["Scenario"])
         ax5.legend()
@@ -556,7 +557,7 @@ def print_summary(df):
     print("BENCHMARK SUMMARY")
     print(f"{'='*80}\n")
 
-    scenarios = ["1. All CPU", "2. A on GPU", "3. A,b on GPU", "4. All GPU"]
+    scenarios = ["1. All GPU", "2. A,b on GPU", "3. A on GPU", "4. All CPU"]
 
     print("BEST SOLVER FOR EACH SCENARIO:")
     print(f"{'─'*80}")
@@ -572,7 +573,7 @@ def print_summary(df):
             print(f"  Total Time:   {best['Total Time (s)']:.4f} s")
             print(f"  Iterations:   {best['Iterations']}")
 
-    cpu_subset = df[df["Scenario"] == "1. All CPU"]
+    cpu_subset = df[df["Scenario"] == "4. All CPU"]
     if len(cpu_subset) > 0:
         cpu_best_time = cpu_subset["Solve Time (s)"].min()
 
@@ -580,7 +581,7 @@ def print_summary(df):
         print("SPEEDUP ANALYSIS (vs Best CPU Solver)")
         print(f"{'='*80}")
 
-        for scenario in scenarios[1:]:
+        for scenario in scenarios[:3]:
             subset = df[df["Scenario"] == scenario]
             if len(subset) > 0:
                 gpu_best_time = subset["Solve Time (s)"].min()
@@ -594,7 +595,7 @@ if __name__ == "__main__":
         "--output-dir", type=str, required=True, help="Directory to save result plots"
     )
     parser.add_argument("--mpi-procs", type=int, required=True, help="Number of MPI processes")
-    parser.add_argument("--problem-size", type=int, default=2048, help="Grid size")
+    parser.add_argument("--problem-size", type=int, default=32, help="Grid size")
     args, unknown = parser.parse_known_args()
 
     rank = PETSc.COMM_WORLD.Get_rank()
