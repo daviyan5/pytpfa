@@ -17,7 +17,7 @@ mpi:
   omp_places: "cores"
 
 gpu:
-  use_mps: false
+  use_mps: true
   vec_type: "cuda"
   mat_type: "aijcusparse"
 
@@ -41,7 +41,7 @@ correctness:
   timeout_hours: 1.0
 
 performance:
-  mesh: [100, 100, 100]
+  mesh: [30, 30, 30]
   mpi_processes: [1, 2, 4]
   runs: 2
   adjust_timestep: "Adjust timestep and final"

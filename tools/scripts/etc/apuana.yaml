@@ -46,7 +46,7 @@ correctness:
     - [150, 150, 150]    # 3.375.000 cells
     - [175, 175, 175]    # 5.359.375 cells
     - [200, 200, 200]    # 8.000.000 cells
-  adjust_timestep: "Adjust timestep"
+  adjust_timestep: "Adjust timestep and final"
   use_gpu: false
   mpi_processes: 32
   optimized: true

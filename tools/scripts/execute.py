@@ -897,6 +897,9 @@ def main():
                 results = test_weak_scaling(config, temp_path, config.reservoir_base)
                 output_file = f"weak_{args.config}_{timestamp}.yml"
 
+            print("Processando resultados para serialização...")
+            results = clean_numpy_types(results)
+
             output_path = os.path.join(config.results_dir, output_file)
             with open(output_path, "w") as f:
                 yaml.dump(
@@ -924,9 +927,28 @@ def main():
             print(f"\nErro: {e}")
             traceback.print_exc()
             sys.exit(1)
-        finally:
-            if mps_enabled:
-                cleanup_gpu_mps()
+
+
+def clean_numpy_types(data):
+    """
+    Converte recursivamente tipos NumPy em tipos nativos do Python (int, float, list, dict)
+    para serialização limpa em JSON/YAML.
+    """
+    if isinstance(data, dict):
+        return {k: clean_numpy_types(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_numpy_types(v) for v in data]
+    elif isinstance(data, np.integer):
+        return int(data)
+    elif isinstance(data, np.floating):
+        return float(data)
+    elif isinstance(data, np.ndarray):
+        return clean_numpy_types(data.tolist())
+    elif isinstance(data, (np.bool_, bool)):
+        return bool(data)
+    elif data is None:
+        return None
+    return data
 
 
 if __name__ == "__main__":
