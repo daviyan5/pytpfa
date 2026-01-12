@@ -216,6 +216,16 @@ class DMStagManager:
         dmda_manager = self._get_dmda_manager(stencil_loc)
         return dmda_manager.get_vec(name)
 
+    def update_from_global(self, name, stencil_loc):
+        if self.dmstag is None:
+            raise ValueError("DMStag is not set. Call set_dm() first.")
+
+        if name not in self.all_fields:
+            raise KeyError(f"Field {name} does not exist.")
+
+        dmda_manager = self._get_dmda_manager(stencil_loc)
+        return dmda_manager.fields[name].update_from_global()
+
     def get_coordinates(self, stencil_loc, use_ghost=False):
         """
         Get the coordinates for a specific stencil location.

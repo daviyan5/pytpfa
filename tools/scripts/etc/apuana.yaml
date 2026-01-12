@@ -1,0 +1,88 @@
+# =============================================================================
+# apuana.yaml - Configuração para o cluster Apuana (UFPE/CIn)
+# Caso 3D: Cubo 2000×2000×2000 ft
+# =============================================================================
+paths:
+  reservoir_base: "../examples/example_Li/reservoir.ini"
+  run_script: "../run.py"
+  results_dir: "./results"
+  temp_dir: "/tmp"
+
+hardware:
+  total_cores: 64
+  cores_per_socket: 32
+  num_gpus: 4
+  gpu_model: "NVIDIA A100"
+  vram_per_gpu_gb: 40
+  total_ram_gb: 512
+
+mpi:
+  processes: [1, 2, 4, 8, 16, 32]
+  bind_to: "core"
+  map_by: "core"
+  omp_num_threads: 1
+  omp_proc_bind: "close"
+  omp_places: "cores"
+
+gpu:
+  use_mps: true
+  vec_type: "cuda"
+  mat_type: "aijcusparse"
+
+solver:
+  ksp_type: "fgmres"
+  pc_type: "gamg"
+  ksp_rtol: 1.0e-8
+  ksp_max_it: 1000
+
+correctness:
+  meshes:
+    - [25, 25, 25]       # 15.625 cells
+    - [40, 40, 40]       # 64.000 cells
+    - [60, 60, 60]       # 216.000 cells
+    - [80, 80, 80]       # 512.000 cells
+    - [100, 100, 100]    # 1.000.000 cells
+    - [125, 125, 125]    # 1.953.125 cells
+    - [150, 150, 150]    # 3.375.000 cells
+    - [175, 175, 175]    # 5.359.375 cells
+    - [200, 200, 200]    # 8.000.000 cells
+  adjust_timestep: "Adjust timestep"
+  use_gpu: false
+  mpi_processes: 32
+  optimized: true
+  timeout_hours: 4.0
+
+performance:
+  mesh: [200, 200, 200]
+  mpi_processes: [1, 2, 4, 8, 16, 32]
+  runs: 3
+  adjust_timestep: "Adjust timestep and final"
+  optimized: true
+  timeout_hours: 2.0
+
+strong_scaling:
+  mesh: [200, 200, 200]
+  mpi_processes: [1, 2, 3, 4]
+  runs: 3
+  adjust_timestep: "Adjust timestep and final"
+  use_gpu: true
+  optimized: true
+  timeout_hours: 2.0
+
+weak_scaling:
+  base_mesh: [100, 100, 100]
+  mpi_processes: [1, 2, 3, 4]
+  runs: 3
+  adjust_timestep: "Adjust timestep and final"
+  use_gpu: true
+  optimized: true
+  timeout_hours: 3.0
+
+domain:
+  lx: 2000.0
+  ly: 2000.0
+  lz: 2000.0
+  time_final_days: 365.0
+  pressure_unit: "psi"
+  length_unit: "ft"
+  time_unit: "days"

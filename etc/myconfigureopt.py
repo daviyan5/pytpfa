@@ -13,6 +13,7 @@ configure_options_perf = [
     "--with-make-test-np=2",
     "--with-openmp",
     "--with-openmp-kernels",
+    "--with-64-bit-indices=1",
     "CFLAGS+=-O3 -pedantic -Wno-long-long -Wno-overlength-strings",
     "FFLAGS+=-O3 -ffree-line-length-512",
     "CXXFLAGS+=-O3 -pedantic -Wno-long-long -Wno-overlength-strings",

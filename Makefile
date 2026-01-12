@@ -7,7 +7,8 @@ OPT ?= yes      # Use optimized flags (skip checks)
 POST ?= no      # Enable post-processing (VTK output)
 PROFILE ?= no   # Enable cProfile/line_profiler
 LIMIT ?= no     # Limit memory usage per process
-GPU ?= yes       # Enable GPU support (requires CUDA and PETSc with GPU support)
+GPU ?= yes      # Enable GPU support (requires CUDA and PETSc with GPU support)
+TYPE ?= ksp
 
 # --- Project Paths ---
 SCRIPT_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -59,6 +60,8 @@ else
     PROFILE_FLAG =
 endif
 
+TYPE_FLAG = -type $(TYPE)
+
 # --- Command Definitions ---
 PYTHON_EXEC = python3 $(RUN_DIR)
 
@@ -68,9 +71,9 @@ ifeq ($(GPU),yes)
 	EXPORT_CMD := $(EXPORT_CMD) && $(GPU_EXPORT_CMD)
 endif
 MPIRUN_CMD = $(EXPORT_CMD) && mpirun --bind-to core -n $(MPI)
-KSP_FLAGS = -ksp_type fgmres -pc_type gamg -ksp_reuse_preconditioner true
+KSP_FLAGS = -ksp_type fgmres -pc_type gamg -ksp_reuse_preconditioner true -snes_lag_jacobian -2 -snes_lag_preconditioner -2
 HYPRE_FLAGS = -pc_hypre euclid -pc_hypre_boomeramg_trunc_factor 0.1 -pc_hypre_boomeramg_coarsen_type HMIS -pc_hypre_boomeramg_max_levels 10
-ALL_FLAGS = $(DEBUG_FLAG) $(OPT_FLAG) $(POST_FLAG) $(PROFILE_FLAG) $(KSP_FLAGS) $(GPU_FLAG)
+ALL_FLAGS = $(TYPE_FLAG) $(DEBUG_FLAG) $(OPT_FLAG) $(POST_FLAG) $(PROFILE_FLAG) $(KSP_FLAGS) $(GPU_FLAG)
 
 # --- Example Definitions ---
 EXAMPLE1_FLAGS = -name TPFA_Example1 -reservoir $(EXAMPLE_DIR)/example_1/reservoir.ini

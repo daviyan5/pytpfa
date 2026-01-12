@@ -49,18 +49,16 @@ class TPFASolverTS:
         # For TS
         self.residual = None
         self.ts = None
+        self.A = None
+        self.J_mat = None
 
-        # Dict to avoid unnecessary updates
-        self.last_time = {
-            "update_system": -1.0,
-            "set_boundary_conditions": -1.0,
-            "assemble_matrix": -1.0,
-            "assemble_rhs": -1.0,
-        }
+        self.device = PETSc.Device.create()
 
-    def solve(self, reservoir_path, checks=True, postprocess=False):
+    def solve(self, reservoir_path, checks=True, postprocess=False, use_gpu=False):
         self.do_checks = checks
         self.do_postprocess = postprocess
+        self.use_gpu = (self.device.getDeviceType() == "CUDA") and use_gpu
+
         self.comm = PETSc.COMM_WORLD
         self.rank = PETSc.COMM_WORLD.getRank()
         self.out_info["rank"] = self.rank
@@ -99,6 +97,8 @@ class TPFASolverTS:
 
             # Set initial conditions
             self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
+            self.update_system()
+            self.assemble_matrix()
             self.ts.setSolution(self.x)
 
             # Run the time stepping solver
@@ -149,23 +149,18 @@ class TPFASolverTS:
         logger.info("Preparing fields for TPFASolverTS...", extra={"context": "Solver PREPROCESS"})
         self.dmstag_manager = DMStagManager(3)
 
-        # We won't use edges
-        self.dmstag_manager.dof_count[1] = 0
-
         # Element fields
-        self.dmstag_manager.add_field("pressure", 1, 3, is_shared=True)
+        self.dmstag_manager.add_field("pressure", 1, 3, is_shared=True, gpu=self.use_gpu)
         self.dmstag_manager.add_field("volume", 1, 3)
-        self.dmstag_manager.add_field("permeability", 3, 3, is_shared=True)  # K
-        self.dmstag_manager.add_field("porosity", 1, 3)  # φ
-        self.dmstag_manager.add_field("formation_factor", 1, 3)  # B
-        self.dmstag_manager.add_field("accumulation_coefficient", 1, 3, is_shared=True)  # Gamma
-        self.dmstag_manager.add_field("external_source", 1, 3, is_shared=True)  # S_u
-        self.dmstag_manager.add_field("rhs", 1, 3, is_shared=True)  # Right-hand side vector
-        self.dmstag_manager.add_field(
-            "elem_transmissibility", 1, 3, is_shared=True
-        )  # Transmissibility for the element
-        # self.dmstag_manager.add_field("clf", 1, 3, is_shared=True)
-        self.dmstag_manager.add_field("residual", 1, 3, is_shared=True)  # Residual vector
+        self.dmstag_manager.add_field("permeability", 3, 3, is_shared=True)
+        self.dmstag_manager.add_field("porosity", 1, 3)
+        self.dmstag_manager.add_field("formation_factor", 1, 3)
+        self.dmstag_manager.add_field("accumulation_coefficient", 1, 3, is_shared=True)
+        self.dmstag_manager.add_field("external_source", 1, 3, is_shared=True)
+
+        self.dmstag_manager.add_field("rhs", 1, 3, is_shared=True, gpu=self.use_gpu)
+        self.dmstag_manager.add_field("elem_transmissibility", 1, 3, is_shared=True)
+        self.dmstag_manager.add_field("residual", 1, 3, is_shared=True, gpu=self.use_gpu)
 
         # Faces fields
         self.dmstag_manager.add_field("area", 1, 2)
@@ -189,13 +184,12 @@ class TPFASolverTS:
         self.out_info["n_elements"] = np.prod(reservoir_sizes)
         self.hx, self.hy, self.hz = reservoir_h
 
-        dof_count = self.dmstag_manager.get_dof_count()
         logger.debug(
-            f"Reservoir sizes: {reservoir_sizes}, length: {reservoir_length}, h: {reservoir_h}, Dof count: {dof_count}",
+            f"Reservoir sizes: {reservoir_sizes}, length: {reservoir_length}, h: {reservoir_h}",
             extra={"context": "Solver PREPROCESS"},
         )
         self.dmstag = create_3d_dmstag(
-            reservoir_sizes, reservoir_h, dof_count, name=config.description.name, cache=True
+            reservoir_sizes, reservoir_h, (1, 1, 1, 1), name=config.description.name, cache=True
         )
         self.dmstag_manager.set_dm(self.dmstag)
 
@@ -207,8 +201,8 @@ class TPFASolverTS:
         K[:] = [K_xx, K_yy, K_zz]
         self.dmstag_manager.set_field("permeability", SL.ELEMENT, K)
 
-        self.ALPHA_C = 5.615
-        self.BETA_C = 1.127
+        self.ALPHA_C = 1  # 5.615
+        self.BETA_C = 1  # 1.127
 
         self.FLUID_COMPRESSIBILITY = config.input.cfluid
         self.PORE_COMPRESSIBILITY = config.input.cporo
@@ -611,49 +605,57 @@ class TPFASolverTS:
             f"Number of rows: {len(rows)}, Number of cols: {len(cols)}",
             extra={"context": "Solver SETUP"},
         )
+        dmda = self.dmstag_manager.get_dmda(SL.ELEMENT)
+        ao = dmda.getAO()
+
+        rows_is = PETSc.IS().createGeneral(rows.astype(PETSc.IntType))
+        cols_is = PETSc.IS().createGeneral(cols.astype(PETSc.IntType))
+
+        rows_is = ao.app2petsc(rows_is)
+        cols_is = ao.app2petsc(cols_is)
+
+        rows = rows_is.getIndices()
+        cols = cols_is.getIndices()
 
         # Create the matrix
         self.A = PETSc.Mat().create()
         n_elems = self.dmstag_manager.get_count(SL.ELEMENT)
         n_elems_global = self.dmstag_manager.get_count(SL.ELEMENT, is_global=True)
-
         self.A.setSizes([(n_elems, n_elems_global), (n_elems, n_elems_global)])
+
+        if self.use_gpu:
+            self.A.setType(PETSc.Mat.Type.AIJCUSPARSE)
+        else:
+            self.A.setType(PETSc.Mat.Type.AIJ)
+
         self.A.setFromOptions()
-        self.A.setPreallocationCOO(rows, cols)
 
         logger.debug(
-            f"A Mat: {self.A.getInfo()}",
+            f"Starting preallocation...",
             extra={"context": "Solver SETUP"},
         )
+        self.A.setPreallocationCOO(rows, cols)
+
+        self.J_mat = self.A.duplicate(copy=False)
 
         self.residual = self.dmstag_manager.get_field_vec("residual", SL.ELEMENT)
 
         self.ts = PETSc.TS().create(self.comm)
         self.ts.setProblemType(PETSc.TS.ProblemType.LINEAR)
         self.ts.setType(PETSc.TS.Type.BEULER)
-        self.ts.setDM(self.dmstag_manager.get_dmda(SL.ELEMENT))
 
         self.ts.setMonitor(monitor, args=(self,))
-
         self.ts.setIFunction(compute_residual, self.residual, args=(self,))
-        self.ts.setIJacobian(compute_jacobian, self.A, self.A, args=(self,))
+        self.ts.setIJacobian(compute_jacobian, self.J_mat, self.J_mat, args=(self,))
 
         self.ts.setTime(self.TIME_INITIAL)
         self.ts.setTimeStep(self.TIME_STEP)
         self.ts.setMaxTime(self.TIME_FINAL)
-        self.ts.setMaxSteps(int((self.TIME_FINAL - self.TIME_INITIAL) / self.TIME_STEP) + 10)
         self.ts.setExactFinalTime(PETSc.TS.ExactFinalTime.STEPOVER)
 
         self.ts.setFromOptions()
 
     def update_system(self):
-        if self.last_time["update_system"] == self.current_time:
-            logger.debug(
-                f"Skipping update for iteration {self.iteration} at time {self.current_time:.2f}",
-                extra={"context": f"Solver UPDATE [{self.iteration}]"},
-            )
-            return
-        self.last_time["update_system"] = self.current_time
         logger.debug(
             "Updating system variables...", extra={"context": f"Solver UPDATE [{self.iteration}]"}
         )
@@ -716,13 +718,7 @@ class TPFASolverTS:
             )
 
     def set_boundary_conditions(self):
-        if self.last_time["set_boundary_conditions"] == self.current_time:
-            logger.debug(
-                f"Skipping boundary conditions for iteration {self.iteration} at time {self.current_time:.2f}",
-                extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
-            )
-            return
-        self.last_time["set_boundary_conditions"] = self.current_time
+
         logger.debug(
             "Setting boundary conditions...",
             extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
@@ -794,32 +790,18 @@ class TPFASolverTS:
         self.dmstag_manager.set_field("external_source", SL.ELEMENT, S_u_local)
 
     def assemble_rhs(self):
-        if self.last_time["assemble_rhs"] == self.current_time:
-            logger.debug(
-                f"Skipping RHS assembly for iteration {self.iteration} at time {self.current_time:.2f}",
-                extra={"context": f"Solver RHS [{self.iteration}]"},
-            )
-            return
-        self.last_time["assemble_rhs"] = self.current_time
+
         S_u = self.dmstag_manager.get_field("external_source", SL.ELEMENT)
 
         xe, ye, ze = self.dmstag_manager.get_coordinates(SL.ELEMENT).T
-        S_u += self.SOURCE_TERM(xe, ye, ze, self.current_time)
+        volume = self.dmstag_manager.get_field("volume", SL.ELEMENT)
 
-        gamma = self.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
-        pressure = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
+        S_u += self.SOURCE_TERM(xe, ye, ze, self.current_time) * volume
 
-        b = -(S_u + gamma * pressure / self.TIME_STEP)
-        self.dmstag_manager.set_field("rhs", SL.ELEMENT, b)
+        self.dmstag_manager.set_field("rhs", SL.ELEMENT, S_u)
 
     def assemble_matrix(self):
-        if self.last_time["assemble_matrix"] == self.current_time:
-            logger.debug(
-                f"Skipping matrix assembly for iteration {self.iteration} at time {self.current_time:.2f}",
-                extra={"context": f"Solver MATRIX [{self.iteration}]"},
-            )
-            return
-        self.last_time["assemble_matrix"] = self.current_time
+
         Tp = np.zeros(self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)).flatten()
         # clf = np.zeros(self.dmstag_manager.get_ghost_sizes(SL.ELEMENT)).flatten()
 
@@ -861,7 +843,6 @@ class TPFASolverTS:
         # self.dmstag_manager.set_field("clf", SL.ELEMENT, 0)
         # self.dmstag_manager.set_field("clf", SL.ELEMENT, clf, use_ghost=True)
 
-        self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, 0)
         self.dmstag_manager.set_field("elem_transmissibility", SL.ELEMENT, Tp, use_ghost=True)
         Tp_local = self.dmstag_manager.get_field("elem_transmissibility", SL.ELEMENT)
 
@@ -885,7 +866,7 @@ class TPFASolverTS:
         )
         self.A.setValuesCOO(data, PETSc.InsertMode.INSERT_VALUES)
 
-    def check(self, time):
+    def check(self, time, pressure_sim_vec):
         if not self.analytical_solution:
             logger.debug(
                 "Problem does not have an analytical solution, skipping check.",
@@ -912,7 +893,6 @@ class TPFASolverTS:
         #     )
 
         element_centroid = self.dmstag_manager.get_coordinates(SL.ELEMENT)
-        pressure_sim = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
 
         pressure_truth = self.analytical_solution(
             element_centroid[:, 0],
@@ -921,7 +901,7 @@ class TPFASolverTS:
             time,
         )
 
-        error_vector = pressure_sim - pressure_truth
+        error_vector = pressure_sim_vec.getArray(readonly=True) - pressure_truth
 
         norm_truth_l1 = np.linalg.norm(pressure_truth, ord=1)
         norm_truth_l2 = np.linalg.norm(pressure_truth, ord=2)
@@ -982,17 +962,20 @@ def monitor(ts, step, time, U, ctx):
     Monitor function called at each time step
     """
     ctx.iteration = step
-    ctx.current_time = time
+    ctx.current_time = time + step
 
     logger.info(
         f"Time step {step}: t = {time:.2f}",
         extra={"context": f"Solver MONITOR [{step}]"},
     )
 
-    ctx.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, U)
+    if step > 0:
+        ctx.dmstag_manager.update_from_global("pressure", SL.ELEMENT)
+        ctx.update_system()
+        ctx.assemble_matrix()
 
     if ctx.do_checks:
-        ctx.check(time)
+        ctx.check(time, U)
 
     if ctx.do_postprocess:
         ctx.postprocess(time)
@@ -1005,57 +988,42 @@ def compute_residual(ts, t, U, U_t, residual, ctx):
     Compute the residual F = U_t - A*U - b
     For the implicit form: F(t, u, u_t) = 0
     """
-    updating_start = time()
-
     ctx.current_time = t
 
-    ctx.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, U)
-
-    ctx.update_system()
     ctx.set_boundary_conditions()
-
     ctx.assemble_rhs()
-    b = ctx.dmstag_manager.get_field_vec("rhs", SL.ELEMENT, ctx.b)
+    b_vec = ctx.dmstag_manager.get_field_vec("rhs", SL.ELEMENT)
 
-    ctx.assemble_matrix()
     ctx.A.mult(U, residual)
 
-    gamma = ctx.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
     gamma_vec = ctx.dmstag_manager.get_field_vec("accumulation_coefficient", SL.ELEMENT)
 
-    work_vec = U_t.duplicate()
-    work_vec.pointwiseMult(gamma_vec, U_t)
+    term = U_t.duplicate()
+    term.pointwiseMult(gamma_vec, U_t)
 
-    residual.axpy(1.0, work_vec)
-    residual.axpy(-1.0, b)
+    residual.axpy(1.0, term)
+    residual.axpy(-1.0, b_vec)
 
-    work_vec.destroy()
-
-    updating_end = time()
-    ctx.updating_time += updating_end - updating_start
-
+    term.destroy()
     return 0
 
 
 def compute_jacobian(ts, t, U, U_t, shift, J, P, ctx):
-    updating_start = time()
-
+    """
+    Computes J = A + shift * Gamma
+    """
     ctx.current_time = t
 
-    ctx.dmstag_manager.restore_field_vec("pressure", SL.ELEMENT, U)
+    ctx.A.copy(J, structure=PETSc.Mat.Structure.SAME_NONZERO_PATTERN)
 
-    ctx.update_system()
-    ctx.assemble_matrix()
+    gamma_vec = ctx.dmstag_manager.get_field_vec("accumulation_coefficient", SL.ELEMENT)
 
-    gamma = ctx.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
-    all_elem = ctx.dmstag_manager.get_global_indices(SL.ELEMENT)
+    diag_contrib = gamma_vec.duplicate()
+    diag_contrib.copy(gamma_vec)
+    diag_contrib.scale(shift)
 
-    for i, elem_idx in enumerate(all_elem):
-        J.setValue(elem_idx, elem_idx, shift * gamma[i], PETSc.InsertMode.ADD_VALUES)
+    J.setDiagonal(diag_contrib, addv=PETSc.InsertMode.ADD_VALUES)
+    diag_contrib.destroy()
 
     J.assemble()
-
-    updating_end = time()
-    ctx.updating_time += updating_end - updating_start
-
     return 0

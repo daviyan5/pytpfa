@@ -20,6 +20,7 @@ def parse_command_line_arguments():
     """Parse command line arguments using PETSc Options"""
     OptDB = PETSc.Options()
 
+    stype = OptDB.getString("type", "ksp")
     name = OptDB.getString("name", "TPFA")
     reservoir_path = OptDB.getString("reservoir", "0")
     log_level = OptDB.getString("log_level", "INFO").upper()
@@ -38,6 +39,7 @@ def parse_command_line_arguments():
     petsc_opts = {key: OptDB.getString(key) for key in OptDB.getAll().keys()}
 
     return {
+        "type": stype.lower(),
         "name": name,
         "reservoir_path": reservoir_path,
         "log_level": log_level,
@@ -69,7 +71,10 @@ def run_simulation(config):
     line_profiler = None
 
     try:
-        simulation = TPFASolver(config["name"])
+        if config["type"] == "ts":
+            simulation = TPFASolverTS(config["name"])
+        else:
+            simulation = TPFASolver(config["name"])
 
         if config["profile_mode"]:
             main_logger.info("Running with profiling enabled", extra={"context": "MAIN"})

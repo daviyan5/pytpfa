@@ -96,7 +96,7 @@ class TPFASolver:
             for t_idx, (t_n, t_np1) in enumerate(zip(times[:-1], times[1:])):
 
                 self.iteration = t_idx
-                self.current_time = t_n
+                self.current_time = t_np1
 
                 logger.info(
                     f"Starting time {t_n:.2f} to {t_np1:.2f}",
@@ -185,9 +185,6 @@ class TPFASolver:
         self.dmstag_manager.add_field("fluid_transmissibility", 1, 2)  # Ty, Tz, Tx
 
     def preprocess_problem_data(self, reservoir_path):
-        """
-        MODIFIED: This method now uses the new io.py parser.
-        """
         logger.info("Preprocessing problem data...", extra={"context": "Solver PREPROCESS"})
         self.dirname = os.path.dirname(reservoir_path)
 
@@ -619,14 +616,18 @@ class TPFASolver:
             f"Number of rows: {len(rows)}, Number of cols: {len(cols)}",
             extra={"context": "Solver SETUP"},
         )
-        logger.debug(
-            f"Range of rows: {np.min(rows)} to {np.max(rows)}",
-            extra={"context": "Solver SETUP"},
-        )
-        logger.debug(
-            f"Range of cols: {np.min(cols)} to {np.max(cols)}",
-            extra={"context": "Solver SETUP"},
-        )
+
+        dmda = self.dmstag_manager.get_dmda(SL.ELEMENT)
+        ao = dmda.getAO()
+
+        rows_is = PETSc.IS().createGeneral(rows.astype(PETSc.IntType))
+        cols_is = PETSc.IS().createGeneral(cols.astype(PETSc.IntType))
+
+        rows_is = ao.app2petsc(rows_is)
+        cols_is = ao.app2petsc(cols_is)
+
+        rows = rows_is.getIndices()
+        cols = cols_is.getIndices()
 
         self.A = PETSc.Mat().create()
         n_elems = self.dmstag_manager.get_count(SL.ELEMENT)
@@ -831,7 +832,8 @@ class TPFASolver:
         S_u = self.dmstag_manager.get_field("external_source", SL.ELEMENT)
 
         xe, ye, ze = self.dmstag_manager.get_coordinates(SL.ELEMENT).T
-        S_u += self.SOURCE_TERM(xe, ye, ze, self.current_time)
+        volume = self.dmstag_manager.get_field("volume", SL.ELEMENT)
+        S_u += self.SOURCE_TERM(xe, ye, ze, self.current_time) * volume
 
         gamma = self.dmstag_manager.get_field("accumulation_coefficient", SL.ELEMENT)
         pressure = self.dmstag_manager.get_field("pressure", SL.ELEMENT)
@@ -921,6 +923,7 @@ class TPFASolver:
         """
         logger.info("Solving the system...", extra={"context": f"Solver SOLVE [{self.iteration}]"})
         self.ksp.solve(self.b, self.x)
+        self.dmstag_manager.update_from_global("pressure", SL.ELEMENT)
 
     def check(self, time):
         """

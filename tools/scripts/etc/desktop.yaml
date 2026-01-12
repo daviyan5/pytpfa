@@ -1,0 +1,76 @@
+# =============================================================================
+# desktop.yaml - Configuração para testes locais
+# Caso 3D: Cubo 2000×2000×2000 ft
+# =============================================================================
+paths:
+  reservoir_base: "../examples/example_Li/reservoir.ini"
+  run_script: "../run.py"
+  results_dir: "./results_local"
+  temp_dir: "/tmp"
+
+mpi:
+  processes: [1, 2, 4]
+  bind_to: "core"
+  map_by: "core"
+  omp_num_threads: 1
+  omp_proc_bind: "close"
+  omp_places: "cores"
+
+gpu:
+  use_mps: false
+  vec_type: "cuda"
+  mat_type: "aijcusparse"
+
+solver:
+  ksp_type: "fgmres"
+  pc_type: "gamg"
+  ksp_rtol: 1.0e-8
+  ksp_max_it: 1000
+
+correctness:
+  meshes:
+    - [25, 25, 25]      # 15.625 cells
+    - [40, 40, 40]      # 64.000 cells
+    - [50, 50, 50]      # 125.000 cells
+    - [60, 60, 60]      # 216.000 cells
+    - [75, 75, 75]      # 421.875 cells
+  adjust_timestep: "Adjust timestep and final"
+  use_gpu: false
+  mpi_processes: 6
+  optimized: false
+  timeout_hours: 1.0
+
+performance:
+  mesh: [100, 100, 100]
+  mpi_processes: [1, 2, 4]
+  runs: 2
+  adjust_timestep: "Adjust timestep and final"
+  optimized: true
+  timeout_hours: 1.0
+
+strong_scaling:
+  mesh: [100, 100, 100]
+  mpi_processes: [1]
+  runs: 2
+  adjust_timestep: "Adjust timestep and final"
+  use_gpu: true
+  optimized: true
+  timeout_hours: 1.0
+
+weak_scaling:
+  base_mesh: [50, 50, 50]
+  mpi_processes: [1]
+  runs: 2
+  adjust_timestep: "Adjust timestep and final"
+  use_gpu: true
+  optimized: true
+  timeout_hours: 1.0
+
+domain:
+  lx: 2000.0
+  ly: 2000.0
+  lz: 2000.0
+  time_final_days: 365.0
+  pressure_unit: "psi"
+  length_unit: "ft"
+  time_unit: "days"

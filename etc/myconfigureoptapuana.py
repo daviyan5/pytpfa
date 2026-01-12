@@ -18,6 +18,7 @@ configure_options_perf = [
     "--with-make-test-np=2",
     "--with-openmp",
     "--with-openmp-kernels",
+    "--with-64-bit-indices=1",
     "CFLAGS=-O3 -march=native -mtune=native",
     "FFLAGS=-O3 -march=native -mtune=native -ffree-line-length-512",
     "CXXFLAGS=-O3 -march=native -mtune=native",
