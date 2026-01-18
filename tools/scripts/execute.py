@@ -7,6 +7,7 @@ Available tests:
   - performance:  CPU vs GPU benchmark (same MPI count)
   - strong:       Strong scaling (CPU+GPU, 1-4 processes)
   - weak:         Weak scaling (CPU+GPU, 1-4 processes)
+  - bandwidth:    Memory bandwidth and roofline analysis
   - all:          All tests
 """
 
@@ -32,7 +33,6 @@ from dataclasses import dataclass, field
 
 
 def numpy_to_python(obj: Any) -> Any:
-    """Recursively convert numpy types to native Python types."""
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, np.integer):
@@ -50,15 +50,12 @@ def numpy_to_python(obj: Any) -> Any:
 
 
 def save_yaml(data: Any, filepath: Union[str, Path]) -> None:
-    """Save data to YAML file, converting numpy types."""
     clean_data = numpy_to_python(data)
     with open(filepath, "w") as f:
         yaml.dump(clean_data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
 class TestLogger:
-    """Manages logging for test execution."""
-    
     def __init__(self, results_dir: Path, test_type: str, timestamp: str):
         self.results_dir = Path(results_dir)
         self.test_type = test_type
@@ -70,16 +67,13 @@ class TestLogger:
     def _setup_loggers(self):
         logging.root.handlers = []
         self.master_log = self.logs_dir / "execution.log"
-        
         file_formatter = logging.Formatter(
             '%(asctime)s | %(levelname)-8s | %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        
         master_handler = logging.FileHandler(self.master_log, mode='w')
         master_handler.setFormatter(file_formatter)
         master_handler.setLevel(logging.DEBUG)
-        
         self.logger = logging.getLogger(f"tpfa.{self.test_type}")
         self.logger.setLevel(logging.DEBUG)
         self.logger.handlers.clear()
@@ -209,6 +203,8 @@ class Config:
     num_gpus: int = 4
     vram_per_gpu_gb: int = 16
     total_ram_gb: int = 251
+    gpu_model: str = "Quadro RTX 5000"
+    gpu_bandwidth_gb_s: float = 448.0
 
     mpi_processes: List[int] = field(default_factory=lambda: [1, 2, 4])
     bind_to: str = "none"
@@ -252,6 +248,17 @@ class Config:
     weak_timeout: float = 2.0
     weak_optimized: bool = True
 
+    bandwidth_reservoir: str = ""
+    bandwidth_mesh: List[int] = field(default_factory=lambda: [270, 270, 270])
+    bandwidth_mpi: int = 16
+    bandwidth_num_gpus: int = 4
+    bandwidth_runs: int = 1
+    bandwidth_timeout: float = 12.0
+    bandwidth_optimized: bool = True
+    bandwidth_bytes_per_cell: int = 64
+    bandwidth_stencil_size: int = 7
+    bandwidth_flops_per_cell: int = 14
+
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "Config":
         with open(yaml_path, "r") as f:
@@ -271,6 +278,8 @@ class Config:
             config.num_gpus = data["hardware"].get("num_gpus", 4)
             config.vram_per_gpu_gb = data["hardware"].get("vram_per_gpu_gb", 16)
             config.total_ram_gb = data["hardware"].get("total_ram_gb", 251)
+            config.gpu_model = data["hardware"].get("gpu_model", "Quadro RTX 5000")
+            config.gpu_bandwidth_gb_s = data["hardware"].get("gpu_bandwidth_gb_s", 448.0)
 
         if "mpi" in data:
             config.mpi_processes = data["mpi"].get("processes", [1, 2, 4])
@@ -298,7 +307,6 @@ class Config:
                     meshes=case.get("meshes", [[20, 20, 20]]),
                 )
                 config.correctness_cases.append(tc)
-            
             config.correctness_timeout = data["correctness"].get("timeout_hours", 2.0)
             config.correctness_use_gpu = data["correctness"].get("use_gpu", False)
             config.correctness_optimized = data["correctness"].get("optimized", False)
@@ -331,6 +339,19 @@ class Config:
             config.weak_decomposition = {int(k): v for k, v in decomp.items()}
             config.weak_optimized = data["weak_scaling"].get("optimized", True)
 
+        if "bandwidth" in data:
+            config.bandwidth_reservoir = data["bandwidth"].get("reservoir_base", "")
+            config.bandwidth_mesh = data["bandwidth"].get("mesh", [270, 270, 270])
+            config.bandwidth_mpi = data["bandwidth"].get("mpi_processes", 16)
+            config.bandwidth_num_gpus = data["bandwidth"].get("num_gpus", 4)
+            config.bandwidth_runs = data["bandwidth"].get("runs", 1)
+            config.bandwidth_timeout = data["bandwidth"].get("timeout_hours", 12.0)
+            config.bandwidth_optimized = data["bandwidth"].get("optimized", True)
+            if "analysis" in data["bandwidth"]:
+                config.bandwidth_bytes_per_cell = data["bandwidth"]["analysis"].get("bytes_per_cell", 64)
+                config.bandwidth_stencil_size = data["bandwidth"]["analysis"].get("stencil_size", 7)
+                config.bandwidth_flops_per_cell = data["bandwidth"]["analysis"].get("flops_per_cell", 14)
+
         return config
 
     def print_summary(self, test_type: str):
@@ -340,6 +361,8 @@ class Config:
         print_metric("Physical cores", str(self.physical_cores))
         print_metric("NUMA nodes", str(self.numa_nodes))
         print_metric("GPUs", str(self.num_gpus), f"x {self.vram_per_gpu_gb}GB VRAM")
+        print_metric("GPU Model", self.gpu_model)
+        print_metric("GPU Peak Bandwidth", f"{self.gpu_bandwidth_gb_s:.0f}", "GB/s")
         print_metric("RAM Total", str(self.total_ram_gb), "GB")
 
         if test_type == "correctness":
@@ -368,13 +391,21 @@ class Config:
             print_metric("Base/process", f"{m[0]}x{m[1]}x{m[2]}", f"= {total:,} cells")
             print_metric("MPI processes", str(self.weak_mpi))
 
+        elif test_type == "bandwidth":
+            m = self.bandwidth_mesh
+            total = m[0] * m[1] * m[2]
+            print(f"\n{Colors.BOLD}Test: BANDWIDTH / ROOFLINE ANALYSIS{Colors.END}")
+            print_metric("Mesh", f"{m[0]}x{m[1]}x{m[2]}", f"= {total:,} cells")
+            print_metric("MPI processes", str(self.bandwidth_mpi))
+            print_metric("GPUs", str(self.bandwidth_num_gpus))
+            print_metric("Bytes/cell", str(self.bandwidth_bytes_per_cell))
+            print_metric("FLOPs/cell", str(self.bandwidth_flops_per_cell))
+
 
 def prepare_gpu_mps(config: Config) -> bool:
     if not config.use_mps:
         return False
-
     print_section("CHECKING GPU MPS ENVIRONMENT")
-
     try:
         result = subprocess.run(["pgrep", "-f", "nvidia-cuda-mps"], capture_output=True)
         if result.returncode == 0:
@@ -391,7 +422,6 @@ def prepare_gpu_mps(config: Config) -> bool:
 def parse_reservoir_ini(reservoir_path: str) -> Dict:
     config = configparser.ConfigParser()
     config.read(reservoir_path)
-    
     return {
         "nx": config.getint("RESERVOIR_INPUT", "NX"),
         "ny": config.getint("RESERVOIR_INPUT", "NY"),
@@ -405,35 +435,22 @@ def parse_reservoir_ini(reservoir_path: str) -> Dict:
     }
 
 
-def create_reservoir_ini(
-    reservoir_path: str,
-    output_path: str,
-    nx: int,
-    ny: int,
-    nz: int,
-) -> Dict:
+def create_reservoir_ini(reservoir_path: str, output_path: str, nx: int, ny: int, nz: int) -> Dict:
     config = configparser.ConfigParser()
     config.read(reservoir_path)
 
     lx = config.getfloat("RESERVOIR_INPUT", "LX")
     ly = config.getfloat("RESERVOIR_INPUT", "LY")
     lz = config.getfloat("RESERVOIR_INPUT", "LZ")
-
     base_nx = config.getint("RESERVOIR_INPUT", "NX")
-    
     refinement_ratio = nx / base_nx
-    
     time_step = config.getfloat("TIME_SETTINGS", "TIME_STEP")
     time_final = config.getfloat("TIME_SETTINGS", "TIME_FINAL")
-
     time_step /= refinement_ratio
     time_final /= refinement_ratio
-
     config.set("TIME_SETTINGS", "TIME_STEP", str(time_step))
     config.set("TIME_SETTINGS", "TIME_FINAL", str(time_final))
-
     time_initial = config.getfloat("TIME_SETTINGS", "TIME_INITIAL")
-
     config.set("RESERVOIR_INPUT", "NX", str(nx))
     config.set("RESERVOIR_INPUT", "NY", str(ny))
     config.set("RESERVOIR_INPUT", "NZ", str(nz))
@@ -469,8 +486,6 @@ def create_reservoir_ini(
 
 
 class MemoryMonitor:
-    """Monitor RAM and VRAM usage during execution."""
-    
     def __init__(self, pid: int, use_gpu: bool = False):
         self.pid = pid
         self.use_gpu = use_gpu
@@ -480,7 +495,6 @@ class MemoryMonitor:
         self.vram_per_gpu = []
     
     def _get_vram_usage(self) -> Tuple[float, List[Dict]]:
-        """Get VRAM usage from nvidia-smi in MB."""
         try:
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=index,memory.used,memory.total", 
@@ -489,7 +503,6 @@ class MemoryMonitor:
             )
             if result.returncode != 0:
                 return 0.0, []
-            
             total_vram = 0.0
             per_gpu = []
             for line in result.stdout.strip().split('\n'):
@@ -500,11 +513,7 @@ class MemoryMonitor:
                         used_mb = float(parts[1].strip())
                         total_mb = float(parts[2].strip())
                         total_vram += used_mb
-                        per_gpu.append({
-                            "gpu": gpu_idx,
-                            "used_mb": used_mb,
-                            "total_mb": total_mb
-                        })
+                        per_gpu.append({"gpu": gpu_idx, "used_mb": used_mb, "total_mb": total_mb})
             return total_vram, per_gpu
         except Exception:
             return 0.0, []
@@ -521,12 +530,10 @@ class MemoryMonitor:
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
                 self.ram_samples.append(total_mem / (1024 * 1024))
-                
                 if self.use_gpu:
                     vram_total, vram_per = self._get_vram_usage()
                     self.vram_samples.append(vram_total)
                     self.vram_per_gpu.append(vram_per)
-                
                 time.sleep(0.5)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 break
@@ -535,7 +542,6 @@ class MemoryMonitor:
         self.running = False
     
     def get_stats(self) -> Dict[str, Any]:
-        """Return complete memory statistics."""
         stats = {
             "ram": {
                 "max_mb": float(max(self.ram_samples)) if self.ram_samples else 0.0,
@@ -544,7 +550,6 @@ class MemoryMonitor:
                 "samples": len(self.ram_samples),
             }
         }
-        
         if self.use_gpu and self.vram_samples:
             stats["vram"] = {
                 "max_mb": float(max(self.vram_samples)),
@@ -557,11 +562,7 @@ class MemoryMonitor:
                 if num_gpus > 0:
                     per_gpu_max = []
                     for gpu_idx in range(num_gpus):
-                        gpu_samples = [
-                            s[gpu_idx]["used_mb"] 
-                            for s in self.vram_per_gpu 
-                            if len(s) > gpu_idx
-                        ]
+                        gpu_samples = [s[gpu_idx]["used_mb"] for s in self.vram_per_gpu if len(s) > gpu_idx]
                         if gpu_samples:
                             per_gpu_max.append({
                                 "gpu": gpu_idx,
@@ -569,7 +570,6 @@ class MemoryMonitor:
                                 "total_mb": self.vram_per_gpu[0][gpu_idx]["total_mb"]
                             })
                     stats["vram"]["per_gpu"] = per_gpu_max
-        
         return stats
 
 
@@ -584,9 +584,6 @@ def run_solver(
     postprocess: bool = False,
     log_level: str = "INFO"
 ) -> Tuple[Optional[Dict], Dict]:
-    """
-    Run the solver and return ALL data from the JSON output plus memory stats.
-    """
     reservoir_path = os.path.abspath(reservoir_path)
     output_dir = Path(reservoir_path).parent / "output"
     if output_dir.exists():
@@ -596,8 +593,7 @@ def run_solver(
     run_py_name = os.path.basename(config.run_script)
 
     cmd = [
-        "mpiexec",
-        "-n", str(mpi_processes),
+        "mpiexec", "-n", str(mpi_processes),
         "-env", "OMP_NUM_THREADS", str(config.omp_num_threads),
         "-env", "OMP_PROC_BIND", "false",
         "-env", "OMP_PLACES", "threads",
@@ -627,21 +623,12 @@ def run_solver(
         _logger.debug(f"Executing: {' '.join(cmd)}")
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            cwd=run_py_dir,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
+        process = subprocess.Popen(cmd, cwd=run_py_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         monitor = MemoryMonitor(process.pid, use_gpu=use_gpu)
         monitor_thread = threading.Thread(target=monitor.monitor)
         monitor_thread.start()
-
         timeout_seconds = int(timeout_hours * 3600)
         stdout, stderr = process.communicate(timeout=timeout_seconds)
-
         monitor.stop()
         monitor_thread.join(timeout=2)
         memory_data = monitor.get_stats()
@@ -660,11 +647,6 @@ def run_solver(
         json_files = list(output_dir.glob("*.json"))
         if not json_files:
             print_error(f"No JSON generated")
-            if stderr_str:
-                error_lines = [l for l in stderr_str.split('\n') if 'ERROR' in l or 'Error' in l]
-                if error_lines:
-                    for line in error_lines[:5]:
-                        print(f"      {Colors.RED}{line.strip()}{Colors.END}")
             return None, memory_data
 
         with open(json_files[0], "r") as f:
@@ -690,15 +672,9 @@ def test_correctness_case(config: Config, case: TestCase, temp_dir: Path) -> Dic
     
     if not os.path.exists(reservoir_path):
         print_error(f"File not found: {reservoir_path}")
-        return {
-            "name": case.name,
-            "description": case.description,
-            "status": "FILE_NOT_FOUND",
-            "results": [],
-        }
+        return {"name": case.name, "description": case.description, "status": "FILE_NOT_FOUND", "results": []}
     
     orig_config = parse_reservoir_ini(reservoir_path)
-    
     print_section(f"Case: {case.name} - {case.description}")    
     results_data = []
     
@@ -734,9 +710,7 @@ def test_correctness_case(config: Config, case: TestCase, temp_dir: Path) -> Dic
         if results:
             l2_list = results.get("l2_error") or []
             l2_val = float(l2_list[-1]) if l2_list else -1.0
-            
             print_success(f"Done in {elapsed:.1f}s, L2 = {l2_val:.6e}")
-            
             results_data.append({
                 "mesh_id": f"M{i+1}",
                 "nx": int(nx), "ny": int(ny), "nz": int(nz),
@@ -758,35 +732,21 @@ def test_correctness_case(config: Config, case: TestCase, temp_dir: Path) -> Dic
             })
         else:
             print_error("FAILED")
-            results_data.append({
-                "mesh_id": f"M{i+1}",
-                "status": "FAILED",
-                "memory": memory
-            })
+            results_data.append({"mesh_id": f"M{i+1}", "status": "FAILED", "memory": memory})
     
-    valid_results = [r for r in results_data if "l2_error" in r and r.get("l2_error", -1) > 0]
-    
-    
-    return {
-        "name": case.name,
-        "description": case.description,
-        "results": results_data,
-    }
+    return {"name": case.name, "description": case.description, "results": results_data}
 
 
 def test_correctness(config: Config, temp_dir: Path) -> List[Dict]:
     print_header("CORRECTNESS TESTS")
-    
     all_results = []
     for case in config.correctness_cases:
         case_result = test_correctness_case(config, case, temp_dir)
         all_results.append(case_result)
-    
     return all_results
 
 
 def test_performance(config: Config, temp_dir: Path) -> Dict:
-    """Performance test: CPU vs GPU comparison with same MPI counts."""
     reservoir_path = os.path.abspath(os.path.join(
         os.path.dirname(config.run_script), config.performance_reservoir
     ))
@@ -805,40 +765,23 @@ def test_performance(config: Config, temp_dir: Path) -> Dict:
 
     for mpi in config.performance_mpi:
         print_section(f"{mpi} MPI process(es)")
-        
-        mpi_result = {
-            "mpi": int(mpi),
-            "total_cells": int(total_size),
-            "cpu": {"runs": []},
-            "gpu": {"runs": []},
-        }
+        mpi_result = {"mpi": int(mpi), "total_cells": int(total_size), "cpu": {"runs": []}, "gpu": {"runs": []}}
         
         print(f"\n  {Colors.BOLD}[CPU]{Colors.END}")
         for r in range(config.performance_runs):
             print(f"    Run {r+1}/{config.performance_runs}...", end=" ", flush=True)
-
-            results, memory = run_solver(
-                config, actual_ini_path, mpi,
-                f"Perf_CPU_{mpi}p_r{r}",
-                use_gpu=False,
-                opt=config.performance_optimized,
-                timeout_hours=config.performance_timeout,
-            )
-
+            results, memory = run_solver(config, actual_ini_path, mpi, f"Perf_CPU_{mpi}p_r{r}",
+                                         use_gpu=False, opt=config.performance_optimized,
+                                         timeout_hours=config.performance_timeout)
             if results:
                 run_data = {
                     "run_id": r,
-                    "times": {
-                        "total": float(results.get("total_time", 0)),
-                        "preprocessing": float(results.get("preprocessing_time", 0)),
-                        "solving": float(results.get("solving_time", 0)),
-                        "updating": float(results.get("updating_time", 0)),
-                    },
+                    "times": {"total": float(results.get("total_time", 0)),
+                              "preprocessing": float(results.get("preprocessing_time", 0)),
+                              "solving": float(results.get("solving_time", 0)),
+                              "updating": float(results.get("updating_time", 0))},
                     "memory": memory,
-                    "solver_info": {
-                        "n_iterations": results.get("n_iterations", 0),
-                        "n_elements": results.get("n_elements", 0),
-                    }
+                    "solver_info": {"n_iterations": results.get("n_iterations", 0), "n_elements": results.get("n_elements", 0)}
                 }
                 mpi_result["cpu"]["runs"].append(run_data)
                 print(f"{run_data['times']['total']:.2f}s (solve: {run_data['times']['solving']:.2f}s)")
@@ -858,39 +801,25 @@ def test_performance(config: Config, temp_dir: Path) -> Dict:
                 "max_ram_mb": float(max([r["memory"]["ram"]["max_mb"] for r in valid_cpu])),
                 "successful_runs": len(valid_cpu),
             }
-            print(f"    -> CPU avg: {mpi_result['cpu']['summary']['avg_total']:.2f}s")
 
         print(f"\n  {Colors.BOLD}[GPU]{Colors.END}")
         for r in range(config.performance_runs):
             print(f"    Run {r+1}/{config.performance_runs}...", end=" ", flush=True)
-
-            results, memory = run_solver(
-                config, actual_ini_path, mpi,
-                f"Perf_GPU_{mpi}p_r{r}",
-                use_gpu=True,
-                opt=config.performance_optimized,
-                timeout_hours=config.performance_timeout,
-            )
-
+            results, memory = run_solver(config, actual_ini_path, mpi, f"Perf_GPU_{mpi}p_r{r}",
+                                         use_gpu=True, opt=config.performance_optimized,
+                                         timeout_hours=config.performance_timeout)
             if results:
                 run_data = {
                     "run_id": r,
-                    "times": {
-                        "total": float(results.get("total_time", 0)),
-                        "preprocessing": float(results.get("preprocessing_time", 0)),
-                        "solving": float(results.get("solving_time", 0)),
-                        "updating": float(results.get("updating_time", 0)),
-                    },
+                    "times": {"total": float(results.get("total_time", 0)),
+                              "preprocessing": float(results.get("preprocessing_time", 0)),
+                              "solving": float(results.get("solving_time", 0)),
+                              "updating": float(results.get("updating_time", 0))},
                     "memory": memory,
-                    "solver_info": {
-                        "n_iterations": results.get("n_iterations", 0),
-                        "n_elements": results.get("n_elements", 0),
-                    }
+                    "solver_info": {"n_iterations": results.get("n_iterations", 0), "n_elements": results.get("n_elements", 0)}
                 }
                 mpi_result["gpu"]["runs"].append(run_data)
-                vram_str = ""
-                if "vram" in memory:
-                    vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB"
+                vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB" if "vram" in memory else ""
                 print(f"{run_data['times']['total']:.2f}s (solve: {run_data['times']['solving']:.2f}s{vram_str})")
             else:
                 print_error("FAILED")
@@ -911,19 +840,14 @@ def test_performance(config: Config, temp_dir: Path) -> Dict:
             vram_runs = [r for r in valid_gpu if "vram" in r["memory"]]
             if vram_runs:
                 mpi_result["gpu"]["summary"]["max_vram_mb"] = float(max([r["memory"]["vram"]["max_mb"] for r in vram_runs]))
-                mpi_result["gpu"]["summary"]["avg_vram_mb"] = float(np.mean([r["memory"]["vram"]["max_mb"] for r in vram_runs]))
-            
-            print(f"    -> GPU avg: {mpi_result['gpu']['summary']['avg_total']:.2f}s")
 
         if mpi_result["cpu"].get("summary") and mpi_result["gpu"].get("summary"):
             cpu_avg = mpi_result["cpu"]["summary"]["avg_total"]
             gpu_avg = mpi_result["gpu"]["summary"]["avg_total"]
             speedup = float(cpu_avg / gpu_avg)
             mpi_result["speedup"] = speedup
-            
             mpi_result["speedup_solving"] = float(
-                mpi_result["cpu"]["summary"]["avg_solving"] / 
-                mpi_result["gpu"]["summary"]["avg_solving"]
+                mpi_result["cpu"]["summary"]["avg_solving"] / mpi_result["gpu"]["summary"]["avg_solving"]
             ) if mpi_result["gpu"]["summary"]["avg_solving"] > 0 else None
             
             if speedup > 1:
@@ -933,35 +857,10 @@ def test_performance(config: Config, temp_dir: Path) -> Dict:
 
         results_data.append(mpi_result)
 
-    print_header("SUMMARY - PERFORMANCE CPU vs GPU")
-    
-    print(f"\n{'MPI':^6} {'CPU (s)':^12} {'GPU (s)':^12} {'Speedup':^12} {'RAM CPU':^12} {'VRAM GPU':^12}")
-    print("-" * 70)
-    
-    for r in results_data:
-        cpu_str = f"{r['cpu']['summary']['avg_total']:.2f}" if r['cpu'].get('summary') else "FAILED"
-        gpu_str = f"{r['gpu']['summary']['avg_total']:.2f}" if r['gpu'].get('summary') else "FAILED"
-        ram_str = f"{r['cpu']['summary']['max_ram_mb']:.0f}MB" if r['cpu'].get('summary') else "N/A"
-        vram_str = f"{r['gpu']['summary'].get('max_vram_mb', 0):.0f}MB" if r['gpu'].get('summary') else "N/A"
-        
-        if r.get('speedup'):
-            if r['speedup'] > 1:
-                sp_str = f"{Colors.GREEN}{r['speedup']:.2f}x{Colors.END}"
-            else:
-                sp_str = f"{Colors.YELLOW}{1/r['speedup']:.2f}x CPU{Colors.END}"
-        else:
-            sp_str = "N/A"
-        
-        print(f"{r['mpi']:^6} {cpu_str:^12} {gpu_str:^12} {sp_str:^20} {ram_str:^12} {vram_str:^12}")
-
-    return {
-        "mesh": {"nx": int(nx), "ny": int(ny), "nz": int(nz), "total": int(total_size)},
-        "results": results_data,
-    }
+    return {"mesh": {"nx": int(nx), "ny": int(ny), "nz": int(nz), "total": int(total_size)}, "results": results_data}
 
 
 def test_strong_scaling(config: Config, temp_dir: Path) -> Dict:
-    """Strong scaling test using CPU+GPU together."""
     reservoir_path = os.path.abspath(os.path.join(
         os.path.dirname(config.run_script), config.strong_reservoir
     ))
@@ -970,7 +869,6 @@ def test_strong_scaling(config: Config, temp_dir: Path) -> Dict:
     total_size = nx * ny * nz
 
     print_header("STRONG SCALING - CPU+GPU")
-    print(f"\n{Colors.CYAN}Speedup = T(1)/T(N), Efficiency = Speedup/N{Colors.END}\n")
     print_metric("Fixed mesh", f"{nx}x{ny}x{nz}", f"= {total_size:,} cells")
 
     ini_path = temp_dir / f"reservoir_strong_{total_size}.ini"
@@ -982,40 +880,24 @@ def test_strong_scaling(config: Config, temp_dir: Path) -> Dict:
 
     for mpi in config.strong_mpi:
         print_section(f"{mpi} MPI process(es) + {mpi} GPU(s)")
-        
-        mpi_result = {
-            "mpi": int(mpi),
-            "gpus": int(mpi),
-            "total_cells": int(total_size),
-            "runs": [],
-        }
+        mpi_result = {"mpi": int(mpi), "gpus": int(mpi), "total_cells": int(total_size), "runs": []}
 
         for r in range(config.strong_runs):
             print(f"  Run {r+1}/{config.strong_runs}...", end=" ", flush=True)
-
-            results, memory = run_solver(
-                config, actual_ini_path, mpi,
-                f"Strong_{mpi}p_r{r}",
-                use_gpu=True,
-                opt=config.strong_optimized,
-                timeout_hours=config.strong_timeout,
-            )
-
+            results, memory = run_solver(config, actual_ini_path, mpi, f"Strong_{mpi}p_r{r}",
+                                         use_gpu=True, opt=config.strong_optimized,
+                                         timeout_hours=config.strong_timeout)
             if results:
                 run_data = {
                     "run_id": r,
-                    "times": {
-                        "total": float(results.get("total_time", 0)),
-                        "preprocessing": float(results.get("preprocessing_time", 0)),
-                        "solving": float(results.get("solving_time", 0)),
-                        "updating": float(results.get("updating_time", 0)),
-                    },
+                    "times": {"total": float(results.get("total_time", 0)),
+                              "preprocessing": float(results.get("preprocessing_time", 0)),
+                              "solving": float(results.get("solving_time", 0)),
+                              "updating": float(results.get("updating_time", 0))},
                     "memory": memory,
                 }
                 mpi_result["runs"].append(run_data)
-                vram_str = ""
-                if "vram" in memory:
-                    vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB"
+                vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB" if "vram" in memory else ""
                 print(f"{run_data['times']['total']:.2f}s{vram_str}")
             else:
                 print_error("FAILED")
@@ -1025,13 +907,10 @@ def test_strong_scaling(config: Config, temp_dir: Path) -> Dict:
         if valid_runs:
             totals = [r["times"]["total"] for r in valid_runs]
             avg_time = float(np.mean(totals))
-            
             if t1 is None:
                 t1 = avg_time
-            
             speedup = float(t1 / avg_time)
             efficiency = float(speedup / mpi * 100)
-            
             mpi_result["summary"] = {
                 "avg_total": avg_time,
                 "std_total": float(np.std(totals)),
@@ -1043,43 +922,23 @@ def test_strong_scaling(config: Config, temp_dir: Path) -> Dict:
                 "efficiency": efficiency,
                 "successful_runs": len(valid_runs),
             }
-            
             vram_runs = [r for r in valid_runs if "vram" in r["memory"]]
             if vram_runs:
                 mpi_result["summary"]["max_vram_mb"] = float(max([r["memory"]["vram"]["max_mb"] for r in vram_runs]))
-            
             eff_color = Colors.GREEN if efficiency >= 80 else (Colors.YELLOW if efficiency >= 60 else Colors.RED)
             print(f"  Speedup: {speedup:.2f}x, Efficiency: {eff_color}{efficiency:.1f}%{Colors.END}")
         
         results_data.append(mpi_result)
 
-    if results_data:
-        print_header("SUMMARY - STRONG SCALING (CPU+GPU)")
-        print(f"\n{'MPI/GPU':^10} {'Time (s)':^12} {'Speedup':^10} {'Efficiency':^12} {'RAM (MB)':^12} {'VRAM (MB)':^12}")
-        print("-" * 75)
-        for r in results_data:
-            if r.get("summary"):
-                s = r["summary"]
-                eff = s["efficiency"]
-                eff_color = Colors.GREEN if eff >= 80 else (Colors.YELLOW if eff >= 60 else Colors.RED)
-                vram_str = f"{s.get('max_vram_mb', 0):.0f}" if s.get('max_vram_mb') else "N/A"
-                print(f"{r['mpi']:^10} {s['avg_total']:^12.2f} {s['speedup']:^10.2f} {eff_color}{eff:^10.1f}%{Colors.END} {s['max_ram_mb']:^12.0f} {vram_str:^12}")
-
-    return {
-        "mesh": {"nx": int(nx), "ny": int(ny), "nz": int(nz), "total": int(total_size)},
-        "results": results_data,
-    }
+    return {"mesh": {"nx": int(nx), "ny": int(ny), "nz": int(nz), "total": int(total_size)}, "results": results_data}
 
 
 def test_weak_scaling(config: Config, temp_dir: Path) -> Dict:
-    """Weak scaling test using CPU+GPU together."""
     reservoir_path = os.path.abspath(os.path.join(
         os.path.dirname(config.run_script), config.weak_reservoir
     ))
 
     print_header("WEAK SCALING - CPU+GPU")
-    print(f"\n{Colors.CYAN}Efficiency = T(1)/T(N) (ideal = 100%){Colors.END}\n")
-
     results_data = []
     t1 = None
 
@@ -1093,47 +952,34 @@ def test_weak_scaling(config: Config, temp_dir: Path) -> Dict:
         total_size = nx * ny * nz
         cells_per_proc = total_size // mpi
 
-        print_section(f"{mpi} MPI + {mpi} GPU - {nx}x{ny}x{nz} = {total_size:,} cells ({cells_per_proc:,}/proc)")
+        print_section(f"{mpi} MPI + {mpi} GPU - {nx}x{ny}x{nz} = {total_size:,} cells")
 
         ini_path = temp_dir / f"reservoir_weak_{mpi}p_{total_size}.ini"
         config_info = create_reservoir_ini(reservoir_path, str(ini_path), nx, ny, nz)
         actual_ini_path = config_info["output_path"]
 
         mpi_result = {
-            "mpi": int(mpi),
-            "gpus": int(mpi),
+            "mpi": int(mpi), "gpus": int(mpi),
             "mesh": {"nx": int(nx), "ny": int(ny), "nz": int(nz)},
-            "total_cells": int(total_size),
-            "cells_per_proc": int(cells_per_proc),
-            "runs": [],
+            "total_cells": int(total_size), "cells_per_proc": int(cells_per_proc), "runs": [],
         }
 
         for r in range(config.weak_runs):
             print(f"  Run {r+1}/{config.weak_runs}...", end=" ", flush=True)
-
-            results, memory = run_solver(
-                config, actual_ini_path, mpi,
-                f"Weak_{mpi}p_r{r}",
-                use_gpu=True,
-                opt=config.weak_optimized,
-                timeout_hours=config.weak_timeout,
-            )
-
+            results, memory = run_solver(config, actual_ini_path, mpi, f"Weak_{mpi}p_r{r}",
+                                         use_gpu=True, opt=config.weak_optimized,
+                                         timeout_hours=config.weak_timeout)
             if results:
                 run_data = {
                     "run_id": r,
-                    "times": {
-                        "total": float(results.get("total_time", 0)),
-                        "preprocessing": float(results.get("preprocessing_time", 0)),
-                        "solving": float(results.get("solving_time", 0)),
-                        "updating": float(results.get("updating_time", 0)),
-                    },
+                    "times": {"total": float(results.get("total_time", 0)),
+                              "preprocessing": float(results.get("preprocessing_time", 0)),
+                              "solving": float(results.get("solving_time", 0)),
+                              "updating": float(results.get("updating_time", 0))},
                     "memory": memory,
                 }
                 mpi_result["runs"].append(run_data)
-                vram_str = ""
-                if "vram" in memory:
-                    vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB"
+                vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB" if "vram" in memory else ""
                 print(f"{run_data['times']['total']:.2f}s{vram_str}")
             else:
                 print_error("FAILED")
@@ -1143,12 +989,9 @@ def test_weak_scaling(config: Config, temp_dir: Path) -> Dict:
         if valid_runs:
             totals = [r["times"]["total"] for r in valid_runs]
             avg_time = float(np.mean(totals))
-            
             if t1 is None:
                 t1 = avg_time
-            
             efficiency = float(t1 / avg_time * 100)
-            
             mpi_result["summary"] = {
                 "avg_total": avg_time,
                 "std_total": float(np.std(totals)),
@@ -1159,32 +1002,200 @@ def test_weak_scaling(config: Config, temp_dir: Path) -> Dict:
                 "efficiency": efficiency,
                 "successful_runs": len(valid_runs),
             }
-            
             vram_runs = [r for r in valid_runs if "vram" in r["memory"]]
             if vram_runs:
                 mpi_result["summary"]["max_vram_mb"] = float(max([r["memory"]["vram"]["max_mb"] for r in vram_runs]))
-            
             eff_color = Colors.GREEN if efficiency >= 80 else (Colors.YELLOW if efficiency >= 60 else Colors.RED)
             print(f"  Efficiency: {eff_color}{efficiency:.1f}%{Colors.END}")
         
         results_data.append(mpi_result)
 
-    if results_data:
-        print_header("SUMMARY - WEAK SCALING (CPU+GPU)")
-        print(f"\n{'MPI/GPU':^10} {'Cells':^12} {'Time (s)':^12} {'Efficiency':^12} {'RAM (MB)':^12} {'VRAM (MB)':^12}")
-        print("-" * 80)
-        for r in results_data:
-            if r.get("summary"):
-                s = r["summary"]
-                eff = s["efficiency"]
-                eff_color = Colors.GREEN if eff >= 80 else (Colors.YELLOW if eff >= 60 else Colors.RED)
-                vram_str = f"{s.get('max_vram_mb', 0):.0f}" if s.get('max_vram_mb') else "N/A"
-                print(f"{r['mpi']:^10} {r['total_cells']:^12,} {s['avg_total']:^12.2f} {eff_color}{eff:^10.1f}%{Colors.END} {s['max_ram_mb']:^12.0f} {vram_str:^12}")
+    return {"base_mesh": list(config.weak_base_mesh), "results": results_data}
 
-    return {
-        "base_mesh": list(config.weak_base_mesh),
-        "results": results_data,
+
+def test_bandwidth(config: Config, temp_dir: Path) -> Dict:
+    """Bandwidth test: Roofline analysis for memory-bound vs compute-bound classification."""
+    reservoir_path = os.path.abspath(os.path.join(
+        os.path.dirname(config.run_script), config.bandwidth_reservoir
+    ))
+    
+    nx, ny, nz = config.bandwidth_mesh
+    total_cells = nx * ny * nz
+    mpi = config.bandwidth_mpi
+    num_gpus = config.bandwidth_num_gpus
+
+    print_header("BANDWIDTH / ROOFLINE ANALYSIS")
+    print(f"\n{Colors.CYAN}Analyzing memory bandwidth utilization and compute intensity{Colors.END}\n")
+    
+    print_metric("Mesh", f"{nx}x{ny}x{nz}", f"= {total_cells:,} cells")
+    print_metric("MPI processes", str(mpi))
+    print_metric("GPUs", str(num_gpus))
+    print_metric("GPU Model", config.gpu_model)
+    print_metric("Peak Bandwidth (per GPU)", f"{config.gpu_bandwidth_gb_s:.0f}", "GB/s")
+    print_metric("Total Peak Bandwidth", f"{config.gpu_bandwidth_gb_s * num_gpus:.0f}", "GB/s")
+
+    ini_path = temp_dir / f"reservoir_bandwidth_{total_cells}.ini"
+    config_info = create_reservoir_ini(reservoir_path, str(ini_path), nx, ny, nz)
+    actual_ini_path = config_info["output_path"]
+
+    print_section(f"Running bandwidth test ({config.bandwidth_runs} run(s))")
+
+    results_data = {
+        "config": {
+            "mesh": {"nx": int(nx), "ny": int(ny), "nz": int(nz)},
+            "total_cells": int(total_cells),
+            "mpi_processes": int(mpi),
+            "num_gpus": int(num_gpus),
+            "gpu_model": config.gpu_model,
+            "peak_bandwidth_per_gpu_gb_s": float(config.gpu_bandwidth_gb_s),
+            "total_peak_bandwidth_gb_s": float(config.gpu_bandwidth_gb_s * num_gpus),
+        },
+        "analysis_params": {
+            "bytes_per_cell": int(config.bandwidth_bytes_per_cell),
+            "stencil_size": int(config.bandwidth_stencil_size),
+            "flops_per_cell": int(config.bandwidth_flops_per_cell),
+        },
+        "runs": [],
     }
+
+    for r in range(config.bandwidth_runs):
+        print(f"\n  Run {r+1}/{config.bandwidth_runs}...", end=" ", flush=True)
+        
+        results, memory = run_solver(
+            config, actual_ini_path, mpi,
+            f"Bandwidth_r{r}",
+            use_gpu=True,
+            opt=config.bandwidth_optimized,
+            timeout_hours=config.bandwidth_timeout,
+        )
+
+        if results:
+            total_time = float(results.get("total_time", 0))
+            solving_time = float(results.get("solving_time", 0))
+            n_iterations = int(results.get("n_iterations", 0))
+            
+            # Dados transferidos (estimativa)
+            # SpMV: para cada iteração, lê x (N doubles), A (nnz doubles + indices), escreve y (N doubles)
+            # TPFA 3D: ~7 não-zeros por linha (stencil)
+            nnz_per_row = config.bandwidth_stencil_size
+            total_nnz = total_cells * nnz_per_row
+            
+            # Bytes por iteração SpMV:
+            # - Vetor x: N * 8 bytes (leitura)
+            # - Vetor y: N * 8 bytes (escrita)
+            # - Matriz A valores: nnz * 8 bytes
+            # - Matriz A indices: nnz * 4 bytes (int32)
+            bytes_per_spmv = (
+                total_cells * 8 +           # x read
+                total_cells * 8 +           # y write
+                total_nnz * 8 +             # A values
+                total_nnz * 4               # A indices
+            )
+            
+            # Total bytes transferidos no solver (GMRES faz ~2 SpMV por iteração + vetores)
+            spmv_per_iteration = 2  # Estimativa para FGMRES
+            total_bytes_solver = bytes_per_spmv * spmv_per_iteration * n_iterations
+            
+            # FLOPs por SpMV: 2 * nnz (uma multiplicação + uma adição por não-zero)
+            flops_per_spmv = 2 * total_nnz
+            total_flops_solver = flops_per_spmv * spmv_per_iteration * n_iterations
+            
+            # Métricas de bandwidth
+            bandwidth_achieved_gb_s = (total_bytes_solver / 1e9) / solving_time if solving_time > 0 else 0
+            bandwidth_efficiency = (bandwidth_achieved_gb_s / (config.gpu_bandwidth_gb_s * num_gpus)) * 100
+            
+            # Intensidade aritmética (FLOPs/Byte)
+            arithmetic_intensity = total_flops_solver / total_bytes_solver if total_bytes_solver > 0 else 0
+            
+            # GFLOPs/s
+            gflops_achieved = (total_flops_solver / 1e9) / solving_time if solving_time > 0 else 0
+            
+            # Classificação: Memory-bound se AI < ridge point (~10 para GPUs modernas)
+            ridge_point = 10.0  # Aproximado para RTX 5000
+            is_memory_bound = arithmetic_intensity < ridge_point
+            
+            vram_str = ""
+            if "vram" in memory:
+                vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB"
+            
+            print_success(f"Done in {total_time:.2f}s (solve: {solving_time:.2f}s{vram_str})")
+            
+            run_data = {
+                "run_id": r,
+                "times": {
+                    "total": total_time,
+                    "solving": solving_time,
+                    "preprocessing": float(results.get("preprocessing_time", 0)),
+                    "updating": float(results.get("updating_time", 0)),
+                },
+                "solver_info": {
+                    "n_iterations": n_iterations,
+                    "n_elements": int(results.get("n_elements", 0)),
+                },
+                "memory": memory,
+                "bandwidth_analysis": {
+                    "total_bytes_transferred_gb": float(total_bytes_solver / 1e9),
+                    "total_flops_gflop": float(total_flops_solver / 1e9),
+                    "bandwidth_achieved_gb_s": float(bandwidth_achieved_gb_s),
+                    "bandwidth_efficiency_percent": float(bandwidth_efficiency),
+                    "arithmetic_intensity_flop_byte": float(arithmetic_intensity),
+                    "gflops_achieved": float(gflops_achieved),
+                    "classification": "Memory-Bound" if is_memory_bound else "Compute-Bound",
+                    "ridge_point": float(ridge_point),
+                },
+            }
+            results_data["runs"].append(run_data)
+            
+        else:
+            print_error("FAILED")
+            results_data["runs"].append({"run_id": r, "status": "FAILED", "memory": memory})
+
+    # Sumário
+    valid_runs = [r for r in results_data["runs"] if "bandwidth_analysis" in r]
+    
+    if valid_runs:
+        print_header("BANDWIDTH ANALYSIS SUMMARY")
+        
+        avg_bandwidth = np.mean([r["bandwidth_analysis"]["bandwidth_achieved_gb_s"] for r in valid_runs])
+        avg_efficiency = np.mean([r["bandwidth_analysis"]["bandwidth_efficiency_percent"] for r in valid_runs])
+        avg_ai = np.mean([r["bandwidth_analysis"]["arithmetic_intensity_flop_byte"] for r in valid_runs])
+        avg_gflops = np.mean([r["bandwidth_analysis"]["gflops_achieved"] for r in valid_runs])
+        classification = valid_runs[0]["bandwidth_analysis"]["classification"]
+        
+        results_data["summary"] = {
+            "avg_bandwidth_gb_s": float(avg_bandwidth),
+            "avg_bandwidth_efficiency_percent": float(avg_efficiency),
+            "avg_arithmetic_intensity": float(avg_ai),
+            "avg_gflops": float(avg_gflops),
+            "classification": classification,
+            "successful_runs": len(valid_runs),
+        }
+        
+        print(f"\n{Colors.BOLD}Roofline Metrics:{Colors.END}")
+        print_metric("Effective Bandwidth", f"{avg_bandwidth:.2f}", "GB/s")
+        print_metric("Peak Bandwidth (total)", f"{config.gpu_bandwidth_gb_s * num_gpus:.0f}", "GB/s")
+        print_metric("Bandwidth Efficiency", f"{avg_efficiency:.1f}", "%")
+        print_metric("Arithmetic Intensity", f"{avg_ai:.4f}", "FLOP/Byte")
+        print_metric("Ridge Point (approx)", f"{ridge_point:.1f}", "FLOP/Byte")
+        print_metric("Achieved GFLOPs", f"{avg_gflops:.2f}", "GFLOP/s")
+        
+        if classification == "Memory-Bound":
+            print(f"\n  {Colors.CYAN}Classification: {Colors.BOLD}MEMORY-BOUND{Colors.END}")
+            print(f"  {Colors.CYAN}  -> Performance limited by memory bandwidth{Colors.END}")
+            print(f"  {Colors.CYAN}  -> Arithmetic Intensity ({avg_ai:.4f}) < Ridge Point ({ridge_point}){Colors.END}")
+        else:
+            print(f"\n  {Colors.GREEN}Classification: {Colors.BOLD}COMPUTE-BOUND{Colors.END}")
+            print(f"  {Colors.GREEN}  -> Performance limited by compute units{Colors.END}")
+        
+        vram_runs = [r for r in valid_runs if "vram" in r.get("memory", {})]
+        if vram_runs:
+            max_vram = max([r["memory"]["vram"]["max_mb"] for r in vram_runs])
+            print(f"\n{Colors.BOLD}Memory Usage:{Colors.END}")
+            print_metric("Peak VRAM (total)", f"{max_vram:.0f}", "MB")
+            print_metric("VRAM per GPU (avg)", f"{max_vram/num_gpus:.0f}", "MB")
+            print_metric("VRAM Utilization", f"{(max_vram/1024)/(config.vram_per_gpu_gb*num_gpus)*100:.1f}", "%")
+
+    return results_data
 
 
 def main():
@@ -1192,7 +1203,7 @@ def main():
     parser.add_argument("--config", required=True, help="Config name (without .yaml)")
     parser.add_argument(
         "--test",
-        choices=["correctness", "performance", "strong", "weak", "all"],
+        choices=["correctness", "performance", "strong", "weak", "bandwidth", "all"],
         default="correctness",
         help="Test type",
     )
@@ -1214,7 +1225,7 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if args.test == "all":
-        tests_to_run = ["performance", "strong", "weak"]
+        tests_to_run = ["performance", "strong", "weak", "bandwidth"]
     else:
         tests_to_run = [args.test]
     
@@ -1242,6 +1253,8 @@ def main():
                 results["strong_scaling"] = test_strong_scaling(config, temp_dir)
             elif test_type == "weak":
                 results["weak_scaling"] = test_weak_scaling(config, temp_dir)
+            elif test_type == "bandwidth":
+                results["bandwidth"] = test_bandwidth(config, temp_dir)
             
             output_dir = results_dir / test_type / timestamp
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -1259,6 +1272,8 @@ def main():
                         "num_gpus": config.num_gpus,
                         "vram_per_gpu_gb": config.vram_per_gpu_gb,
                         "total_ram_gb": config.total_ram_gb,
+                        "gpu_model": config.gpu_model,
+                        "gpu_peak_bandwidth_gb_s": config.gpu_bandwidth_gb_s,
                     }
                 },
                 "results": results,

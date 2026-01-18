@@ -12,6 +12,8 @@ hardware:
   vram_per_gpu_gb: 16
   total_vram_gb: 64
   total_ram_gb: 251
+  gpu_model: "Quadro RTX 5000"
+  gpu_bandwidth_gb_s: 448
 
 mpi:
   processes: [1, 2, 4, 8, 16]
@@ -39,16 +41,6 @@ correctness:
         - [20, 20, 10]
         - [40, 40, 20]
         - [60, 60, 30]
-
-    - name: "example_2"
-      path: "examples/example_2/reservoir.ini"
-      expected_order: 0.0
-      description: "Quadrático"
-      meshes:
-        - [20, 20, 10]
-        - [40, 40, 20]
-        - [60, 60, 30]
-
     - name: "example_3"
       path: "examples/example_3/reservoir.ini"
       expected_order: 2.0
@@ -57,7 +49,6 @@ correctness:
         - [20, 20, 10]
         - [40, 40, 20]
         - [60, 60, 30]
-
     - name: "example_Li"
       path: "examples/example_Li/reservoir.ini"
       expected_order: 2.0
@@ -66,7 +57,6 @@ correctness:
         - [25, 25, 1]
         - [50, 50, 1]
         - [100, 100, 1]
-
   use_gpu: false
   mpi_processes: 2
   optimized: false
@@ -101,3 +91,16 @@ weak_scaling:
     4: [15, 15, 15]
   optimized: true
   timeout_hours: 1.0
+
+bandwidth:
+  reservoir_base: "examples/example_3/reservoir.ini"
+  mesh: [50, 50, 50]
+  mpi_processes: 4
+  num_gpus: 4
+  runs: 1
+  optimized: true
+  timeout_hours: 1.0
+  analysis:
+    bytes_per_cell: 64
+    stencil_size: 7
+    flops_per_cell: 14

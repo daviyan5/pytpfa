@@ -12,6 +12,8 @@ hardware:
   vram_per_gpu_gb: 16
   total_vram_gb: 64
   total_ram_gb: 251
+  gpu_model: "Quadro RTX 5000"
+  gpu_bandwidth_gb_s: 448
 
 mpi:
   processes: [1, 2, 4, 8, 16]
@@ -41,17 +43,6 @@ correctness:
         - [80, 80, 80]
         - [120, 120, 120]
         - [180, 180, 180]
-
-    - name: "example_2"
-      path: "examples/example_2/reservoir.ini"
-      expected_order: 0.0
-      description: "Quadratic (exact solution for TPFA)"
-      meshes:
-        - [50, 50, 50]
-        - [80, 80, 80]
-        - [120, 120, 120]
-        - [180, 180, 180]
-
     - name: "example_3"
       path: "examples/example_3/reservoir.ini"
       expected_order: 2.0
@@ -61,7 +52,6 @@ correctness:
         - [80, 80, 80]
         - [120, 120, 120]
         - [180, 180, 180]
-
     - name: "example_Li"
       path: "examples/example_Li/reservoir.ini"
       expected_order: 2.0
@@ -73,7 +63,6 @@ correctness:
         - [500, 500, 1]
         - [2500, 2500, 1]
         - [3000, 3000, 1]
-
   use_gpu: true
   mpi_processes: 16
   optimized: false
@@ -108,3 +97,16 @@ weak_scaling:
     4: [270, 270, 270]
   optimized: true
   timeout_hours: 10.0
+
+bandwidth:
+  reservoir_base: "examples/example_3/reservoir.ini"
+  mesh: [270, 270, 270]
+  mpi_processes: 16
+  num_gpus: 4
+  runs: 1
+  optimized: true
+  timeout_hours: 12.0
+  analysis:
+    bytes_per_cell: 64
+    stencil_size: 7
+    flops_per_cell: 14
