@@ -8,7 +8,18 @@ Available tests:
   - strong:       Strong scaling (CPU+GPU, 1-4 processes)
   - weak:         Weak scaling (CPU+GPU, 1-4 processes)
   - bandwidth:    Memory bandwidth and roofline analysis
-  - all:          All tests
+  - solvers:      Solver comparison (KSP + Preconditioner combinations)
+  - all:          All tests (runs solvers FIRST, then uses best config for others)
+
+Usage:
+  python execute.py --config jarvis --test performance
+  python execute.py --config jarvis --test solvers
+  python execute.py --config jarvis --test bandwidth
+  python execute.py --config jarvis --test all
+
+Note: When using --test all, the solver comparison runs first and the best
+solver configuration is automatically used for performance, scaling, and
+bandwidth tests. This ensures empirically optimal solver selection.
 """
 
 import os
@@ -259,6 +270,15 @@ class Config:
     bandwidth_stencil_size: int = 7
     bandwidth_flops_per_cell: int = 14
 
+    solver_comparison_reservoir: str = ""
+    solver_comparison_mesh: List[int] = field(default_factory=lambda: [150, 150, 150])
+    solver_comparison_mpi: int = 4
+    solver_comparison_runs: int = 2
+    solver_comparison_use_gpu: bool = True
+    solver_comparison_optimized: bool = True
+    solver_comparison_timeout: float = 4.0
+    solver_comparison_solvers: List[Dict] = field(default_factory=list)
+
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "Config":
         with open(yaml_path, "r") as f:
@@ -352,6 +372,16 @@ class Config:
                 config.bandwidth_stencil_size = data["bandwidth"]["analysis"].get("stencil_size", 7)
                 config.bandwidth_flops_per_cell = data["bandwidth"]["analysis"].get("flops_per_cell", 14)
 
+        if "solver_comparison" in data:
+            config.solver_comparison_reservoir = data["solver_comparison"].get("reservoir_base", "")
+            config.solver_comparison_mesh = data["solver_comparison"].get("mesh", [150, 150, 150])
+            config.solver_comparison_mpi = data["solver_comparison"].get("mpi_processes", 4)
+            config.solver_comparison_runs = data["solver_comparison"].get("runs", 2)
+            config.solver_comparison_use_gpu = data["solver_comparison"].get("use_gpu", True)
+            config.solver_comparison_optimized = data["solver_comparison"].get("optimized", True)
+            config.solver_comparison_timeout = data["solver_comparison"].get("timeout_hours", 4.0)
+            config.solver_comparison_solvers = data["solver_comparison"].get("solvers", [])
+
         return config
 
     def print_summary(self, test_type: str):
@@ -400,6 +430,17 @@ class Config:
             print_metric("GPUs", str(self.bandwidth_num_gpus))
             print_metric("Bytes/cell", str(self.bandwidth_bytes_per_cell))
             print_metric("FLOPs/cell", str(self.bandwidth_flops_per_cell))
+
+        elif test_type == "solvers":
+            m = self.solver_comparison_mesh
+            total = m[0] * m[1] * m[2]
+            print(f"\n{Colors.BOLD}Test: SOLVER COMPARISON{Colors.END}")
+            print_metric("Mesh", f"{m[0]}x{m[1]}x{m[2]}", f"= {total:,} cells")
+            print_metric("MPI processes", str(self.solver_comparison_mpi))
+            print_metric("GPU", "Yes" if self.solver_comparison_use_gpu else "No")
+            print_metric("Solvers to test", str(len(self.solver_comparison_solvers)))
+            for s in self.solver_comparison_solvers:
+                print(f"    - {s['name']}: {s.get('description', '')}")
 
 
 def prepare_gpu_mps(config: Config) -> bool:
@@ -1198,12 +1239,339 @@ def test_bandwidth(config: Config, temp_dir: Path) -> Dict:
     return results_data
 
 
+def run_solver_custom(
+    config: Config,
+    reservoir_path: str,
+    mpi_processes: int,
+    name: str,
+    ksp_type: str,
+    pc_type: str,
+    use_gpu: bool = False,
+    opt: bool = True,
+    timeout_hours: float = 2.0,
+) -> Tuple[Optional[Dict], Dict]:
+    """Run solver with custom KSP/PC configuration."""
+    reservoir_path = os.path.abspath(reservoir_path)
+    output_dir = Path(reservoir_path).parent / "output"
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+
+    run_py_dir = os.path.dirname(os.path.abspath(config.run_script))
+    run_py_name = os.path.basename(config.run_script)
+
+    cmd = [
+        "mpiexec", "-n", str(mpi_processes),
+        "-env", "OMP_NUM_THREADS", str(config.omp_num_threads),
+        "-env", "OMP_PROC_BIND", "false",
+        "-env", "OMP_PLACES", "threads",
+        "-env", "MKL_NUM_THREADS", "1",
+        "-env", "OPENBLAS_NUM_THREADS", "1",
+        "python3", run_py_name,
+        "-name", name,
+        "-reservoir", reservoir_path,
+        "-ksp_type", ksp_type,
+        "-pc_type", pc_type,
+        "-ksp_rtol", str(config.ksp_rtol),
+        "-ksp_reuse_preconditioner", "true",
+        "log_level", "INFO"
+    ]
+
+    if opt:
+        cmd.append("-opt")
+    if use_gpu:
+        cmd.extend(["-gpu", "-vec_type", config.vec_type, "-mat_type", config.mat_type])
+
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = str(config.omp_num_threads)
+
+    if _logger:
+        _logger.debug(f"Executing: {' '.join(cmd)}")
+
+    try:
+        process = subprocess.Popen(cmd, cwd=run_py_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        monitor = MemoryMonitor(process.pid, use_gpu=use_gpu)
+        monitor_thread = threading.Thread(target=monitor.monitor)
+        monitor_thread.start()
+        timeout_seconds = int(timeout_hours * 3600)
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        monitor.stop()
+        monitor_thread.join(timeout=2)
+        memory_data = monitor.get_stats()
+
+        if process.returncode != 0:
+            stderr_str = stderr.decode() if stderr else ""
+            if _logger:
+                _logger.error(f"Non-zero return: {process.returncode}, stderr: {stderr_str[:500]}")
+            return None, memory_data
+
+        json_files = list(output_dir.glob("*.json"))
+        if not json_files:
+            return None, memory_data
+
+        with open(json_files[0], "r") as f:
+            results = json.load(f)
+        
+        return results, memory_data
+
+    except subprocess.TimeoutExpired:
+        process.kill()
+        return None, {}
+    except Exception as e:
+        if _logger:
+            _logger.error(f"Exception: {e}")
+        return None, {}
+
+
+def test_solver_comparison(config: Config, temp_dir: Path) -> Dict:
+    """Compare different solver configurations (KSP + PC combinations)."""
+    reservoir_path = os.path.abspath(os.path.join(
+        os.path.dirname(config.run_script), config.solver_comparison_reservoir
+    ))
+    
+    nx, ny, nz = config.solver_comparison_mesh
+    total_cells = nx * ny * nz
+    mpi = config.solver_comparison_mpi
+    use_gpu = config.solver_comparison_use_gpu
+
+    print_header("SOLVER COMPARISON TEST")
+    print(f"\n{Colors.CYAN}Comparing different KSP + Preconditioner combinations{Colors.END}\n")
+    
+    print_metric("Mesh", f"{nx}x{ny}x{nz}", f"= {total_cells:,} cells")
+    print_metric("MPI processes", str(mpi))
+    print_metric("GPU", "Yes" if use_gpu else "No")
+    print_metric("Runs per solver", str(config.solver_comparison_runs))
+
+    ini_path = temp_dir / f"reservoir_solvers_{total_cells}.ini"
+    config_info = create_reservoir_ini(reservoir_path, str(ini_path), nx, ny, nz)
+    actual_ini_path = config_info["output_path"]
+
+    results_data = {
+        "config": {
+            "mesh": {"nx": int(nx), "ny": int(ny), "nz": int(nz)},
+            "total_cells": int(total_cells),
+            "mpi_processes": int(mpi),
+            "use_gpu": use_gpu,
+            "runs_per_solver": config.solver_comparison_runs,
+        },
+        "solvers": [],
+    }
+
+    baseline_time = None
+
+    for solver_config in config.solver_comparison_solvers:
+        solver_name = solver_config["name"]
+        ksp_type = solver_config["ksp_type"]
+        pc_type = solver_config["pc_type"]
+        description = solver_config.get("description", "")
+
+        print_section(f"{solver_name} ({ksp_type} + {pc_type})")
+        
+        solver_result = {
+            "name": solver_name,
+            "ksp_type": ksp_type,
+            "pc_type": pc_type,
+            "description": description,
+            "runs": [],
+        }
+
+        for r in range(config.solver_comparison_runs):
+            print(f"  Run {r+1}/{config.solver_comparison_runs}...", end=" ", flush=True)
+            
+            results, memory = run_solver_custom(
+                config, actual_ini_path, mpi,
+                f"Solver_{solver_name.replace('+', '_')}_r{r}",
+                ksp_type=ksp_type,
+                pc_type=pc_type,
+                use_gpu=use_gpu,
+                opt=config.solver_comparison_optimized,
+                timeout_hours=config.solver_comparison_timeout,
+            )
+
+            if results:
+                total_time = float(results.get("total_time", 0))
+                solving_time = float(results.get("solving_time", 0))
+                n_iterations = int(results.get("n_iterations", 0))
+                
+                run_data = {
+                    "run_id": r,
+                    "times": {
+                        "total": total_time,
+                        "solving": solving_time,
+                        "preprocessing": float(results.get("preprocessing_time", 0)),
+                        "updating": float(results.get("updating_time", 0)),
+                    },
+                    "solver_info": {
+                        "n_iterations": n_iterations,
+                        "time_per_iteration_ms": (solving_time / n_iterations * 1000) if n_iterations > 0 else 0,
+                    },
+                    "memory": memory,
+                }
+                solver_result["runs"].append(run_data)
+                
+                vram_str = ""
+                if "vram" in memory:
+                    vram_str = f", VRAM: {memory['vram']['max_mb']:.0f}MB"
+                
+                print_success(f"{total_time:.2f}s (solve: {solving_time:.2f}s, {n_iterations} iters{vram_str})")
+            else:
+                print_error("FAILED or TIMEOUT")
+                solver_result["runs"].append({"run_id": r, "status": "FAILED", "memory": memory})
+
+        # Calcular sumário do solver
+        valid_runs = [r for r in solver_result["runs"] if "times" in r]
+        if valid_runs:
+            solving_times = [r["times"]["solving"] for r in valid_runs]
+            total_times = [r["times"]["total"] for r in valid_runs]
+            iterations = [r["solver_info"]["n_iterations"] for r in valid_runs]
+            
+            avg_solving = float(np.mean(solving_times))
+            avg_total = float(np.mean(total_times))
+            avg_iters = float(np.mean(iterations))
+            
+            if baseline_time is None:
+                baseline_time = avg_solving
+            
+            speedup_vs_baseline = float(baseline_time / avg_solving) if avg_solving > 0 else 0
+            
+            solver_result["summary"] = {
+                "avg_solving_time": avg_solving,
+                "std_solving_time": float(np.std(solving_times)),
+                "avg_total_time": avg_total,
+                "avg_iterations": avg_iters,
+                "avg_time_per_iteration_ms": float(avg_solving / avg_iters * 1000) if avg_iters > 0 else 0,
+                "speedup_vs_first": speedup_vs_baseline,
+                "max_ram_mb": float(max([r["memory"]["ram"]["max_mb"] for r in valid_runs])),
+                "successful_runs": len(valid_runs),
+            }
+            
+            vram_runs = [r for r in valid_runs if "vram" in r.get("memory", {})]
+            if vram_runs:
+                solver_result["summary"]["max_vram_mb"] = float(max([r["memory"]["vram"]["max_mb"] for r in vram_runs]))
+            
+            print(f"  -> Avg: {avg_solving:.2f}s, {avg_iters:.0f} iters, {solver_result['summary']['avg_time_per_iteration_ms']:.2f}ms/iter")
+
+        results_data["solvers"].append(solver_result)
+
+    # Sumário final
+    valid_solvers = [s for s in results_data["solvers"] if s.get("summary")]
+    
+    if valid_solvers:
+        print_header("SOLVER COMPARISON SUMMARY")
+        
+        # Encontrar o melhor solver
+        best_solver = min(valid_solvers, key=lambda s: s["summary"]["avg_solving_time"])
+        baseline_solver = valid_solvers[0]
+        
+        print(f"\n{'Solver':<18} {'Solve (s)':<10} {'Iters':<8} {'ms/iter':<10} {'Speedup':<10} {'VRAM (MB)':<10}")
+        print("-" * 76)
+        
+        for s in valid_solvers:
+            summ = s["summary"]
+            speedup = baseline_solver["summary"]["avg_solving_time"] / summ["avg_solving_time"] if summ["avg_solving_time"] > 0 else 0
+            vram_str = f"{summ.get('max_vram_mb', 0):.0f}" if summ.get('max_vram_mb') else "N/A"
+            
+            is_best = s["name"] == best_solver["name"]
+            color = Colors.GREEN if is_best else ""
+            end_color = Colors.END if is_best else ""
+            
+            print(f"{color}{s['name']:<18} {summ['avg_solving_time']:<10.2f} {summ['avg_iterations']:<8.0f} {summ['avg_time_per_iteration_ms']:<10.2f} {speedup:<10.2f}x {vram_str:<10}{end_color}")
+        
+        print(f"\n{Colors.GREEN}Best solver: {best_solver['name']} ({best_solver['summary']['avg_solving_time']:.2f}s){Colors.END}")
+        
+        # Análise por categoria de precondicionador
+        results_data["analysis"] = {
+            "best_solver": best_solver["name"],
+            "best_solving_time": best_solver["summary"]["avg_solving_time"],
+            "baseline_solver": baseline_solver["name"],
+            "baseline_solving_time": baseline_solver["summary"]["avg_solving_time"],
+            "by_preconditioner": {},
+        }
+        
+        # Agrupar por tipo de precondicionador
+        pc_groups = {}
+        for s in valid_solvers:
+            pc = s["pc_type"].upper()
+            if pc not in pc_groups:
+                pc_groups[pc] = []
+            pc_groups[pc].append(s)
+        
+        print(f"\n{Colors.BOLD}Analysis by Preconditioner Type:{Colors.END}")
+        print("-" * 50)
+        
+        for pc, solvers in sorted(pc_groups.items()):
+            best_in_group = min(solvers, key=lambda s: s["summary"]["avg_solving_time"])
+            avg_time = np.mean([s["summary"]["avg_solving_time"] for s in solvers])
+            avg_iters = np.mean([s["summary"]["avg_iterations"] for s in solvers])
+            
+            results_data["analysis"]["by_preconditioner"][pc] = {
+                "best_solver": best_in_group["name"],
+                "best_time": best_in_group["summary"]["avg_solving_time"],
+                "avg_time": float(avg_time),
+                "avg_iterations": float(avg_iters),
+                "count": len(solvers),
+            }
+            
+            print(f"  {pc:<12}: best={best_in_group['name']:<16} time={best_in_group['summary']['avg_solving_time']:.2f}s, avg_iters={avg_iters:.0f}")
+        
+        # Comparações específicas
+        print(f"\n{Colors.BOLD}Key Comparisons:{Colors.END}")
+        print("-" * 50)
+        
+        # GAMG vs outros
+        gamg_solvers = [s for s in valid_solvers if s["pc_type"].lower() == "gamg"]
+        non_gamg_solvers = [s for s in valid_solvers if s["pc_type"].lower() != "gamg" and s["pc_type"].lower() != "none"]
+        
+        if gamg_solvers and non_gamg_solvers:
+            best_gamg = min(gamg_solvers, key=lambda s: s["summary"]["avg_solving_time"])
+            best_non_gamg = min(non_gamg_solvers, key=lambda s: s["summary"]["avg_solving_time"])
+            
+            ratio = best_non_gamg["summary"]["avg_solving_time"] / best_gamg["summary"]["avg_solving_time"]
+            
+            results_data["analysis"]["gamg_comparison"] = {
+                "best_gamg": best_gamg["name"],
+                "best_gamg_time": best_gamg["summary"]["avg_solving_time"],
+                "best_gamg_iters": best_gamg["summary"]["avg_iterations"],
+                "best_other": best_non_gamg["name"],
+                "best_other_time": best_non_gamg["summary"]["avg_solving_time"],
+                "best_other_iters": best_non_gamg["summary"]["avg_iterations"],
+                "gamg_speedup": float(ratio),
+            }
+            
+            if ratio > 1:
+                print(f"  {Colors.GREEN}GAMG ({best_gamg['name']}) is {ratio:.2f}x FASTER than best non-GAMG ({best_non_gamg['name']}){Colors.END}")
+            else:
+                print(f"  {Colors.YELLOW}{best_non_gamg['name']} is {1/ratio:.2f}x faster than GAMG ({best_gamg['name']}){Colors.END}")
+            
+            # Análise de iterações
+            gamg_iters = best_gamg["summary"]["avg_iterations"]
+            other_iters = best_non_gamg["summary"]["avg_iterations"]
+            print(f"  GAMG iterations: {gamg_iters:.0f} vs {best_non_gamg['name']}: {other_iters:.0f}")
+        
+        # Nenhum precondicionador vs melhor
+        none_solvers = [s for s in valid_solvers if s["pc_type"].lower() == "none"]
+        if none_solvers:
+            best_none = min(none_solvers, key=lambda s: s["summary"]["avg_solving_time"])
+            speedup_from_none = best_none["summary"]["avg_solving_time"] / best_solver["summary"]["avg_solving_time"]
+            
+            results_data["analysis"]["preconditioning_benefit"] = {
+                "no_pc_solver": best_none["name"],
+                "no_pc_time": best_none["summary"]["avg_solving_time"],
+                "no_pc_iters": best_none["summary"]["avg_iterations"],
+                "best_pc_speedup": float(speedup_from_none),
+            }
+            
+            print(f"  Preconditioning benefit: {speedup_from_none:.2f}x speedup over no preconditioner")
+            print(f"  (No PC: {best_none['summary']['avg_iterations']:.0f} iters vs Best: {best_solver['summary']['avg_iterations']:.0f} iters)")
+
+    return results_data
+
+
 def main():
     parser = argparse.ArgumentParser(description="TPFA Solver Test Suite")
     parser.add_argument("--config", required=True, help="Config name (without .yaml)")
     parser.add_argument(
         "--test",
-        choices=["correctness", "performance", "strong", "weak", "bandwidth", "all"],
+        choices=["correctness", "performance", "strong", "weak", "bandwidth", "solvers", "all"],
         default="correctness",
         help="Test type",
     )
@@ -1224,12 +1592,21 @@ def main():
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
+    # When running all tests, run solvers FIRST to find the best configuration
     if args.test == "all":
-        tests_to_run = ["performance", "strong", "weak", "bandwidth"]
+        tests_to_run = ["solvers", "performance", "strong", "weak", "bandwidth"]
     else:
         tests_to_run = [args.test]
     
     temp_dir = Path(tempfile.mkdtemp(prefix="TPFA_", dir=config.temp_dir))
+    
+    # Track the best solver found (will be updated after solver comparison)
+    best_solver_config = {
+        "ksp_type": config.ksp_type,
+        "pc_type": config.pc_type,
+        "name": f"{config.ksp_type}+{config.pc_type}",
+        "source": "default",
+    }
     
     try:
         for test_type in tests_to_run:
@@ -1237,8 +1614,14 @@ def main():
             logger.info(f"Starting test: {test_type}")
             logger.info(f"Config file: {config_path}")
             logger.info(f"Temp directory: {temp_dir}")
+            logger.info(f"Using solver: {best_solver_config['name']} (source: {best_solver_config['source']})")
             
             config.print_summary(test_type)
+            
+            # Show which solver is being used (if not the solver comparison test itself)
+            if test_type != "solvers" and best_solver_config["source"] == "solver_comparison":
+                print(f"\n{Colors.GREEN}Using best solver from comparison: {best_solver_config['name']}{Colors.END}")
+            
             prepare_gpu_mps(config)
             
             print(f"\n{Colors.CYAN}Temp directory: {temp_dir}{Colors.END}")
@@ -1255,27 +1638,64 @@ def main():
                 results["weak_scaling"] = test_weak_scaling(config, temp_dir)
             elif test_type == "bandwidth":
                 results["bandwidth"] = test_bandwidth(config, temp_dir)
+            elif test_type == "solvers":
+                solver_results = test_solver_comparison(config, temp_dir)
+                results["solver_comparison"] = solver_results
+                
+                # Extract the best solver and update config for subsequent tests
+                if solver_results.get("analysis", {}).get("best_solver"):
+                    best_name = solver_results["analysis"]["best_solver"]
+                    # Find the solver config
+                    for s in solver_results.get("solvers", []):
+                        if s.get("name") == best_name and s.get("summary"):
+                            config.ksp_type = s["ksp_type"]
+                            config.pc_type = s["pc_type"]
+                            best_solver_config = {
+                                "ksp_type": s["ksp_type"],
+                                "pc_type": s["pc_type"],
+                                "name": best_name,
+                                "solving_time": s["summary"]["avg_solving_time"],
+                                "iterations": s["summary"]["avg_iterations"],
+                                "source": "solver_comparison",
+                            }
+                            print_header("BEST SOLVER SELECTED FOR REMAINING TESTS")
+                            print(f"\n{Colors.GREEN}  Solver: {best_name}{Colors.END}")
+                            print(f"  KSP Type: {s['ksp_type']}")
+                            print(f"  PC Type: {s['pc_type']}")
+                            print(f"  Solving Time: {s['summary']['avg_solving_time']:.2f}s")
+                            print(f"  Iterations: {s['summary']['avg_iterations']:.0f}")
+                            print(f"\n{Colors.CYAN}  This configuration will be used for: performance, strong, weak, bandwidth{Colors.END}")
+                            break
             
             output_dir = results_dir / test_type / timestamp
             output_dir.mkdir(parents=True, exist_ok=True)
             
             output_file = output_dir / "results.yml"
             
-            save_yaml({
-                "metadata": {
-                    "config": args.config,
-                    "test_type": test_type,
-                    "timestamp": timestamp,
-                    "hostname": os.uname().nodename,
-                    "hardware": {
-                        "physical_cores": config.physical_cores,
-                        "num_gpus": config.num_gpus,
-                        "vram_per_gpu_gb": config.vram_per_gpu_gb,
-                        "total_ram_gb": config.total_ram_gb,
-                        "gpu_model": config.gpu_model,
-                        "gpu_peak_bandwidth_gb_s": config.gpu_bandwidth_gb_s,
-                    }
+            # Include solver info in metadata
+            metadata = {
+                "config": args.config,
+                "test_type": test_type,
+                "timestamp": timestamp,
+                "hostname": os.uname().nodename,
+                "hardware": {
+                    "physical_cores": config.physical_cores,
+                    "num_gpus": config.num_gpus,
+                    "vram_per_gpu_gb": config.vram_per_gpu_gb,
+                    "total_ram_gb": config.total_ram_gb,
+                    "gpu_model": config.gpu_model,
+                    "gpu_peak_bandwidth_gb_s": config.gpu_bandwidth_gb_s,
                 },
+                "solver_used": {
+                    "ksp_type": config.ksp_type,
+                    "pc_type": config.pc_type,
+                    "name": best_solver_config["name"],
+                    "source": best_solver_config["source"],
+                },
+            }
+            
+            save_yaml({
+                "metadata": metadata,
                 "results": results,
             }, output_file)
             
@@ -1288,6 +1708,8 @@ def main():
     
     finally:
         print_header("ALL TESTS COMPLETED")
+        if best_solver_config["source"] == "solver_comparison":
+            print(f"{Colors.GREEN}Best solver used: {best_solver_config['name']}{Colors.END}")
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
             print(f"{Colors.CYAN}Temp directory removed{Colors.END}")

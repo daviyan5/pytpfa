@@ -104,7 +104,7 @@ def build_7point_coo_vectorized(nx: int, ny: int, nz: int) -> Tuple[np.ndarray, 
     return rows.astype(np.int32), cols.astype(np.int32), vals.astype(np.float64)
 
 
-def create_and_solve(nx: int, ny: int, nz: int, pc_type: str = "gamg") -> Dict:
+def create_and_solve(nx: int, ny: int, nz: int, pc_type: str = "bjacobi") -> Dict:
     """
     Create matrix, vectors, KSP solver with PC, and do one solve.
     This triggers full GPU allocation including preconditioner structures.
@@ -144,11 +144,11 @@ def create_and_solve(nx: int, ny: int, nz: int, pc_type: str = "gamg") -> Dict:
     # Create KSP with preconditioner
     t0 = time.time()
     ksp = PETSc.KSP().create(PETSc.COMM_SELF)
-    ksp.setType(PETSc.KSP.Type.FGMRES)
+    ksp.setType(PETSc.KSP.Type.CG)
     
     pc = ksp.getPC()
-    if pc_type == "gamg":
-        pc.setType(PETSc.PC.Type.GAMG)
+    if pc_type == "bjacobi":
+        pc.setType(PETSc.PC.Type.BJACOBI)
         pc.setGAMGType("agg")
     elif pc_type == "ilu":
         pc.setType(PETSc.PC.Type.ILU)
@@ -246,7 +246,7 @@ def run_incremental_test(
     step_factor: float = 1.2,
     max_vram_percent: float = 90.0,
     max_iterations: int = 25,
-    pc_type: str = "gamg"
+    pc_type: str = "bjacobi"
 ) -> List[Dict]:
     """Run incremental tests until limit is reached."""
     results = []
@@ -401,7 +401,7 @@ def main():
     # Updated default to 1.1 (10% steps) to avoid crashing too early
     parser.add_argument("--step-factor", type=float, default=1.1, help="Side increment factor")
     parser.add_argument("--max-vram-percent", type=float, default=90, help="Max VRAM (%%)")
-    parser.add_argument("--pc-type", type=str, default="gamg", 
+    parser.add_argument("--pc-type", type=str, default="bjacobi", 
                        choices=["gamg", "ilu", "jacobi", "bjacobi", "none"],
                        help="Preconditioner type")
     args = parser.parse_args()

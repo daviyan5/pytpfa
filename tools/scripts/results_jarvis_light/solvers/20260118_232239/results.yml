@@ -1,0 +1,204 @@
+metadata:
+  config: jarvis_light
+  test_type: solvers
+  timestamp: '20260118_232239'
+  hostname: 8d4cc7ec1281
+  hardware:
+    physical_cores: 32
+    num_gpus: 4
+    vram_per_gpu_gb: 16
+    total_ram_gb: 251
+    gpu_model: Quadro RTX 5000
+    gpu_peak_bandwidth_gb_s: 448
+results:
+  solver_comparison:
+    config:
+      mesh:
+        nx: 40
+        ny: 40
+        nz: 40
+      total_cells: 64000
+      mpi_processes: 2
+      use_gpu: true
+      runs_per_solver: 1
+    solvers:
+    - name: FGMRES+GAMG
+      ksp_type: fgmres
+      pc_type: gamg
+      description: Flexible GMRES com Multigrid Algébrico
+      runs:
+      - run_id: 0
+        times:
+          total: 2.451608180999756
+          solving: 1.1201298236846924
+          preprocessing: 1.1103157997131348
+          updating: 0.21839523315429688
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 112.01298236846924
+        memory:
+          ram:
+            max_mb: 1588.50390625
+            avg_mb: 765.8216145833334
+            min_mb: 2.5
+            samples: 9
+          vram:
+            max_mb: 706.0
+            avg_mb: 376.22222222222223
+            min_mb: 4.0
+            samples: 9
+            per_gpu:
+            - gpu: 0
+              max_mb: 443.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 257.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 1.1201298236846924
+        std_solving_time: 0.0
+        avg_total_time: 2.451608180999756
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 112.01298236846924
+        speedup_vs_first: 1.0
+        max_ram_mb: 1588.50390625
+        successful_runs: 1
+        max_vram_mb: 706.0
+    - name: CG+GAMG
+      ksp_type: cg
+      pc_type: gamg
+      description: Gradiente Conjugado com Multigrid Algébrico
+      runs:
+      - run_id: 0
+        times:
+          total: 2.229591131210327
+          solving: 0.9943809509277344
+          preprocessing: 1.0353388786315918
+          updating: 0.1972365379333496
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 99.43809509277344
+        memory:
+          ram:
+            max_mb: 1582.91015625
+            avg_mb: 740.85302734375
+            min_mb: 2.5
+            samples: 8
+          vram:
+            max_mb: 674.0
+            avg_mb: 363.25
+            min_mb: 4.0
+            samples: 8
+            per_gpu:
+            - gpu: 0
+              max_mb: 403.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 265.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 0.9943809509277344
+        std_solving_time: 0.0
+        avg_total_time: 2.229591131210327
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 99.43809509277344
+        speedup_vs_first: 1.126459454638222
+        max_ram_mb: 1582.91015625
+        successful_runs: 1
+        max_vram_mb: 674.0
+    - name: GMRES+ILU
+      ksp_type: gmres
+      pc_type: ilu
+      description: GMRES com fatoração ILU
+      runs:
+      - run_id: 0
+        status: FAILED
+        memory:
+          ram:
+            max_mb: 1026.31640625
+            avg_mb: 466.1197916666667
+            min_mb: 2.5
+            samples: 6
+          vram:
+            max_mb: 508.0
+            avg_mb: 256.6666666666667
+            min_mb: 4.0
+            samples: 6
+            per_gpu:
+            - gpu: 0
+              max_mb: 333.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 169.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+    - name: CG+Jacobi
+      ksp_type: cg
+      pc_type: jacobi
+      description: Gradiente Conjugado com Jacobi
+      runs:
+      - run_id: 0
+        times:
+          total: 2.0268959999084473
+          solving: 0.6491715908050537
+          preprocessing: 1.161447525024414
+          updating: 0.21289968490600586
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 64.91715908050537
+        memory:
+          ram:
+            max_mb: 1300.0859375
+            avg_mb: 676.13818359375
+            min_mb: 2.5
+            samples: 8
+          vram:
+            max_mb: 562.0
+            avg_mb: 318.0
+            min_mb: 4.0
+            samples: 8
+            per_gpu:
+            - gpu: 0
+              max_mb: 347.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 209.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 0.6491715908050537
+        std_solving_time: 0.0
+        avg_total_time: 2.0268959999084473
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 64.91715908050537
+        speedup_vs_first: 1.7254757286830618
+        max_ram_mb: 1300.0859375
+        successful_runs: 1
+        max_vram_mb: 562.0
+    analysis:
+      best_solver: CG+Jacobi
+      best_solving_time: 0.6491715908050537
+      baseline_solver: FGMRES+GAMG
+      baseline_solving_time: 1.1201298236846924

@@ -1,0 +1,325 @@
+metadata:
+  config: jarvis_light
+  test_type: strong
+  timestamp: '20260118_233212'
+  hostname: 8d4cc7ec1281
+  hardware:
+    physical_cores: 32
+    num_gpus: 4
+    vram_per_gpu_gb: 16
+    total_ram_gb: 251
+    gpu_model: Quadro RTX 5000
+    gpu_peak_bandwidth_gb_s: 448
+  solver_used:
+    ksp_type: cg
+    pc_type: bjacobi
+    name: CG+BJACOBI
+    source: solver_comparison
+results:
+  strong_scaling:
+    mesh:
+      nx: 30
+      ny: 30
+      nz: 30
+      total: 27000
+    results:
+    - mpi: 1
+      gpus: 1
+      total_cells: 27000
+      runs:
+      - run_id: 0
+        times:
+          total: 1.4725253582000732
+          preprocessing: 0.8159387111663818
+          solving: 0.48558926582336426
+          updating: 0.16837191581726074
+        memory:
+          ram:
+            max_mb: 612.265625
+            avg_mb: 352.2135416666667
+            min_mb: 2.5
+            samples: 6
+          vram:
+            max_mb: 260.0
+            avg_mb: 118.33333333333333
+            min_mb: 4.0
+            samples: 6
+            per_gpu:
+            - gpu: 0
+              max_mb: 251.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      - run_id: 1
+        times:
+          total: 1.4279639720916748
+          preprocessing: 0.7768959999084473
+          solving: 0.4692831039428711
+          updating: 0.17946577072143555
+        memory:
+          ram:
+            max_mb: 601.76953125
+            avg_mb: 338.6263020833333
+            min_mb: 2.5
+            samples: 6
+          vram:
+            max_mb: 236.0
+            avg_mb: 109.66666666666667
+            min_mb: 4.0
+            samples: 6
+            per_gpu:
+            - gpu: 0
+              max_mb: 227.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      summary:
+        avg_total: 1.450244665145874
+        std_total: 0.02228069305419922
+        avg_solving: 0.4774361848831177
+        avg_preprocessing: 0.7964173555374146
+        avg_updating: 0.17391884326934814
+        max_ram_mb: 612.265625
+        speedup: 1.0
+        efficiency: 100.0
+        successful_runs: 2
+        max_vram_mb: 260.0
+    - mpi: 2
+      gpus: 2
+      total_cells: 27000
+      runs:
+      - run_id: 0
+        times:
+          total: 1.6267554759979248
+          preprocessing: 0.8617458343505859
+          solving: 0.6007680892944336
+          updating: 0.16168975830078125
+        memory:
+          ram:
+            max_mb: 1327.640625
+            avg_mb: 591.12890625
+            min_mb: 2.5
+            samples: 7
+          vram:
+            max_mb: 602.0
+            avg_mb: 291.14285714285717
+            min_mb: 4.0
+            samples: 7
+            per_gpu:
+            - gpu: 0
+              max_mb: 379.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 217.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      - run_id: 1
+        times:
+          total: 1.5593817234039307
+          preprocessing: 0.8155221939086914
+          solving: 0.5958619117736816
+          updating: 0.14565396308898926
+        memory:
+          ram:
+            max_mb: 1321.546875
+            avg_mb: 576.4319196428571
+            min_mb: 3.0
+            samples: 7
+          vram:
+            max_mb: 602.0
+            avg_mb: 314.85714285714283
+            min_mb: 4.0
+            samples: 7
+            per_gpu:
+            - gpu: 0
+              max_mb: 379.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 217.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      summary:
+        avg_total: 1.5930685997009277
+        std_total: 0.03368687629699707
+        avg_solving: 0.5983150005340576
+        avg_preprocessing: 0.8386340141296387
+        avg_updating: 0.15367186069488525
+        max_ram_mb: 1327.640625
+        speedup: 0.9103466513734144
+        efficiency: 45.517332568670724
+        successful_runs: 2
+        max_vram_mb: 602.0
+    - mpi: 3
+      gpus: 3
+      total_cells: 27000
+      runs:
+      - run_id: 0
+        times:
+          total: 1.6739537715911865
+          preprocessing: 0.8749470710754395
+          solving: 0.6613359451293945
+          updating: 0.13500237464904785
+        memory:
+          ram:
+            max_mb: 1952.1796875
+            avg_mb: 958.595703125
+            min_mb: 2.5
+            samples: 8
+          vram:
+            max_mb: 972.0
+            avg_mb: 460.75
+            min_mb: 4.0
+            samples: 8
+            per_gpu:
+            - gpu: 0
+              max_mb: 539.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 215.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 215.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      - run_id: 1
+        times:
+          total: 1.6946547031402588
+          preprocessing: 0.8724551200866699
+          solving: 0.6687614917755127
+          updating: 0.15007662773132324
+        memory:
+          ram:
+            max_mb: 1976.60546875
+            avg_mb: 971.5224609375
+            min_mb: 2.0
+            samples: 8
+          vram:
+            max_mb: 1020.0
+            avg_mb: 473.75
+            min_mb: 4.0
+            samples: 8
+            per_gpu:
+            - gpu: 0
+              max_mb: 563.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 239.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 215.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3.0
+              total_mb: 24576.0
+      summary:
+        avg_total: 1.6843042373657227
+        std_total: 0.010350465774536133
+        avg_solving: 0.6650487184524536
+        avg_preprocessing: 0.8737010955810547
+        avg_updating: 0.14253950119018555
+        max_ram_mb: 1976.60546875
+        speedup: 0.861034861144848
+        efficiency: 28.7011620381616
+        successful_runs: 2
+        max_vram_mb: 1020.0
+    - mpi: 4
+      gpus: 4
+      total_cells: 27000
+      runs:
+      - run_id: 0
+        times:
+          total: 1.997612476348877
+          preprocessing: 1.2880921363830566
+          solving: 0.5642683506011963
+          updating: 0.14266014099121094
+        memory:
+          ram:
+            max_mb: 2606.234375
+            avg_mb: 1318.6558159722222
+            min_mb: 2.5
+            samples: 9
+          vram:
+            max_mb: 1340.0
+            avg_mb: 639.7777777777778
+            min_mb: 4.0
+            samples: 9
+            per_gpu:
+            - gpu: 0
+              max_mb: 701.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 213.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 213.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 213.0
+              total_mb: 24576.0
+      - run_id: 1
+        times:
+          total: 1.9389886856079102
+          preprocessing: 1.189206600189209
+          solving: 0.5890688896179199
+          updating: 0.15812397003173828
+        memory:
+          ram:
+            max_mb: 2603.0
+            avg_mb: 1325.0972222222222
+            min_mb: 2.5
+            samples: 9
+          vram:
+            max_mb: 1364.0
+            avg_mb: 661.1111111111111
+            min_mb: 4.0
+            samples: 9
+            per_gpu:
+            - gpu: 0
+              max_mb: 701.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 237.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 213.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 213.0
+              total_mb: 24576.0
+      summary:
+        avg_total: 1.9683005809783936
+        std_total: 0.0293118953704834
+        avg_solving: 0.5766686201095581
+        avg_preprocessing: 1.2386493682861328
+        avg_updating: 0.1503920555114746
+        max_ram_mb: 2606.234375
+        speedup: 0.736800404958979
+        efficiency: 18.420010123974475
+        successful_runs: 2
+        max_vram_mb: 1364.0

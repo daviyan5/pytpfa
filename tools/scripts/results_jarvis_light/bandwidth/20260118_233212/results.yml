@@ -1,0 +1,84 @@
+metadata:
+  config: jarvis_light
+  test_type: bandwidth
+  timestamp: '20260118_233212'
+  hostname: 8d4cc7ec1281
+  hardware:
+    physical_cores: 32
+    num_gpus: 4
+    vram_per_gpu_gb: 16
+    total_ram_gb: 251
+    gpu_model: Quadro RTX 5000
+    gpu_peak_bandwidth_gb_s: 448
+  solver_used:
+    ksp_type: cg
+    pc_type: bjacobi
+    name: CG+BJACOBI
+    source: solver_comparison
+results:
+  bandwidth:
+    config:
+      mesh:
+        nx: 50
+        ny: 50
+        nz: 50
+      total_cells: 125000
+      mpi_processes: 4
+      num_gpus: 4
+      gpu_model: Quadro RTX 5000
+      peak_bandwidth_per_gpu_gb_s: 448.0
+      total_peak_bandwidth_gb_s: 1792.0
+    analysis_params:
+      bytes_per_cell: 64
+      stencil_size: 7
+      flops_per_cell: 14
+    runs:
+    - run_id: 0
+      times:
+        total: 2.7722413539886475
+        solving: 1.0993084907531738
+        preprocessing: 1.4108777046203613
+        updating: 0.25920915603637695
+      solver_info:
+        n_iterations: 10
+        n_elements: 125000
+      memory:
+        ram:
+          max_mb: 3066.81640625
+          avg_mb: 1532.747265625
+          min_mb: 2.5
+          samples: 10
+        vram:
+          max_mb: 1468.0
+          avg_mb: 817.2
+          min_mb: 4.0
+          samples: 10
+          per_gpu:
+          - gpu: 0
+            max_mb: 745.0
+            total_mb: 24576.0
+          - gpu: 1
+            max_mb: 233.0
+            total_mb: 24576.0
+          - gpu: 2
+            max_mb: 257.0
+            total_mb: 24576.0
+          - gpu: 3
+            max_mb: 233.0
+            total_mb: 24576.0
+      bandwidth_analysis:
+        total_bytes_transferred_gb: 0.25
+        total_flops_gflop: 0.035
+        bandwidth_achieved_gb_s: 0.22741569095742767
+        bandwidth_efficiency_percent: 0.012690607754320741
+        arithmetic_intensity_flop_byte: 0.14
+        gflops_achieved: 0.03183819673403988
+        classification: Memory-Bound
+        ridge_point: 10.0
+    summary:
+      avg_bandwidth_gb_s: 0.22741569095742767
+      avg_bandwidth_efficiency_percent: 0.012690607754320741
+      avg_arithmetic_intensity: 0.14
+      avg_gflops: 0.03183819673403988
+      classification: Memory-Bound
+      successful_runs: 1

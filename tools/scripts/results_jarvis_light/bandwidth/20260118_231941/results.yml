@@ -1,0 +1,79 @@
+metadata:
+  config: jarvis_light
+  test_type: bandwidth
+  timestamp: '20260118_231941'
+  hostname: 8d4cc7ec1281
+  hardware:
+    physical_cores: 32
+    num_gpus: 4
+    vram_per_gpu_gb: 16
+    total_ram_gb: 251
+    gpu_model: Quadro RTX 5000
+    gpu_peak_bandwidth_gb_s: 448
+results:
+  bandwidth:
+    config:
+      mesh:
+        nx: 50
+        ny: 50
+        nz: 50
+      total_cells: 125000
+      mpi_processes: 4
+      num_gpus: 4
+      gpu_model: Quadro RTX 5000
+      peak_bandwidth_per_gpu_gb_s: 448.0
+      total_peak_bandwidth_gb_s: 1792.0
+    analysis_params:
+      bytes_per_cell: 64
+      stencil_size: 7
+      flops_per_cell: 14
+    runs:
+    - run_id: 0
+      times:
+        total: 3.728057384490967
+        solving: 1.4985766410827637
+        preprocessing: 1.8899776935577393
+        updating: 0.33649611473083496
+      solver_info:
+        n_iterations: 10
+        n_elements: 125000
+      memory:
+        ram:
+          max_mb: 3230.26953125
+          avg_mb: 1289.17859375
+          min_mb: 2.5
+          samples: 25
+        vram:
+          max_mb: 1546.0
+          avg_mb: 497.2
+          min_mb: 4.0
+          samples: 25
+          per_gpu:
+          - gpu: 0
+            max_mb: 745.0
+            total_mb: 24576.0
+          - gpu: 1
+            max_mb: 259.0
+            total_mb: 24576.0
+          - gpu: 2
+            max_mb: 283.0
+            total_mb: 24576.0
+          - gpu: 3
+            max_mb: 259.0
+            total_mb: 24576.0
+      bandwidth_analysis:
+        total_bytes_transferred_gb: 0.25
+        total_flops_gflop: 0.035
+        bandwidth_achieved_gb_s: 0.16682496787042403
+        bandwidth_efficiency_percent: 0.009309429010626341
+        arithmetic_intensity_flop_byte: 0.14
+        gflops_achieved: 0.023355495501859364
+        classification: Memory-Bound
+        ridge_point: 10.0
+    summary:
+      avg_bandwidth_gb_s: 0.16682496787042403
+      avg_bandwidth_efficiency_percent: 0.009309429010626341
+      avg_arithmetic_intensity: 0.14
+      avg_gflops: 0.023355495501859364
+      classification: Memory-Bound
+      successful_runs: 1
