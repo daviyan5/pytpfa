@@ -37,31 +37,30 @@ correctness:
       expected_order: 0.0
       description: "Linear (exact solution for TPFA)"
       meshes:
-        - [10, 10, 10]
-        - [20, 20, 20]
-        - [40, 40, 40]
-        - [60, 60, 60]
+        - [50, 50, 50]
+        - [80, 80, 80]
+        - [120, 120, 120]
+        - [180, 180, 180]
 
     - name: "example_2"
       path: "examples/example_2/reservoir.ini"
       expected_order: 0.0
       description: "Quadratic (exact solution for TPFA)"
       meshes:
-        - [10, 10, 10]
-        - [20, 20, 20]
-        - [40, 40, 40]
-        - [60, 60, 60]
+        - [50, 50, 50]
+        - [80, 80, 80]
+        - [120, 120, 120]
+        - [180, 180, 180]
 
     - name: "example_3"
       path: "examples/example_3/reservoir.ini"
       expected_order: 2.0
       description: "Nonlinear (spatial convergence)"
       meshes:
-        - [20, 20, 10]
-        - [30, 30, 15]
-        - [40, 40, 20]
-        - [60, 60, 30]
-        - [80, 80, 40]
+        - [50, 50, 50]
+        - [80, 80, 80]
+        - [120, 120, 120]
+        - [180, 180, 180]
 
     - name: "example_Li"
       path: "examples/example_Li/reservoir.ini"
@@ -70,29 +69,30 @@ correctness:
       meshes:
         - [25, 25, 1]
         - [50, 50, 1]
-        - [100, 100, 1]
-        - [150, 150, 1]
-        - [200, 200, 1]
+        - [250, 250, 1]
+        - [500, 500, 1]
+        - [2500, 2500, 1]
+        - [3000, 3000, 1]
 
-  use_gpu: false
-  mpi_processes: 4
+  use_gpu: true
+  mpi_processes: 16
   optimized: false
   postprocess: false
   timeout_hours: 2.0
 
 performance:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [200, 200, 200]
+  mesh: [190, 190, 190]
   mpi_processes: [1, 2, 4, 8, 16]
-  runs: 3
+  runs: 2
   optimized: true
   timeout_hours: 10.0
 
 strong_scaling:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [270, 270, 270]
+  mesh: [190, 190, 190]
   mpi_processes: [1, 2, 3, 4]
-  runs: 3
+  runs: 2
   optimized: true
   timeout_hours: 10.0
 
@@ -100,7 +100,7 @@ weak_scaling:
   reservoir_base: "examples/example_3/reservoir.ini"
   base_mesh: [170, 170, 170]
   mpi_processes: [1, 2, 3, 4]
-  runs: 3
+  runs: 2
   decomposition:
     1: [170, 170, 170]
     2: [215, 215, 215]

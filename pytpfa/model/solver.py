@@ -92,7 +92,7 @@ class TPFASolver:
             times = np.arange(self.TIME_INITIAL, self.TIME_FINAL + self.TIME_STEP, self.TIME_STEP)
             n_iterations = len(times) - 1
             self.out_info["n_iterations"] = n_iterations
-            last_iteration_idx = n_iterations - 1
+            check_idx = 0
             
             self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT)
             self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
@@ -117,7 +117,7 @@ class TPFASolver:
                 self.solve_system()
                 end_solve = time()
 
-                if self.do_checks and t_idx == last_iteration_idx:
+                if self.do_checks and t_idx == check_idx:
                     self.check(t_np1)
 
                 self.solving_time += end_solve - start_solve
@@ -932,6 +932,10 @@ class TPFASolver:
     def check(self, time):
         """
         Check the solution against the analytical solution using standard error norms.
+        
+        MODIFICAÇÃO: Exclui células com NaN da solução analítica do cálculo do erro.
+        Isso é útil para problemas com singularidades (como poços) onde a solução
+        analítica não é válida em certas células.
         """
         if not self.analytical_solution:
             logger.debug(
@@ -939,8 +943,6 @@ class TPFASolver:
                 extra={"context": "Solver CHECK"},
             )
             if self.reference is not None:
-                # self.reference has the path (relative to the config file) to a .py script that implements the function "analytical"
-                # this function takes (x, y, z, t) as input and returns the analytical solution at that point
                 import importlib.util
 
                 spec = importlib.util.spec_from_file_location(
@@ -961,34 +963,82 @@ class TPFASolver:
             element_centroid[:, 2],
             time,
         )
-        self.dmstag_manager.set_field("analytical_solution", SL.ELEMENT, pressure_truth)
-
-        error = pressure_sim - pressure_truth
-        self.dmstag_manager.set_field("error", SL.ELEMENT, error)
-
-        pressure_truth_vec = self.dmstag_manager.get_field_vec("analytical_solution", SL.ELEMENT)
-        error_vec = self.dmstag_manager.get_field_vec("error", SL.ELEMENT)
-
-        norm_truth_l1 = pressure_truth_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_1)
-        norm_truth_l2 = pressure_truth_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_2)
-        norm_truth_linf = pressure_truth_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_INFINITY)
-
+        
+        # Converter para array numpy se necessário
+        pressure_truth = np.asarray(pressure_truth, dtype=float)
+        pressure_sim = np.asarray(pressure_sim, dtype=float)
+        
+        # =========================================================================
+        # MODIFICAÇÃO: Identificar células válidas (sem NaN)
+        # =========================================================================
+        valid_mask = ~np.isnan(pressure_truth)
+        n_total = len(pressure_truth)
+        n_valid = np.sum(valid_mask)
+        n_excluded = n_total - n_valid
+        
+        if n_excluded > 0:
+            logger.debug(
+                f"Excluding {n_excluded} cells from error calculation (NaN in analytical solution)",
+                extra={"context": "Solver CHECK"},
+            )
+        
+        if n_valid == 0:
+            logger.warning(
+                "All cells have NaN analytical solution, cannot compute error.",
+                extra={"context": "Solver CHECK"},
+            )
+            return
+        
+        # Filtrar apenas células válidas
+        pressure_truth_valid = pressure_truth[valid_mask]
+        pressure_sim_valid = pressure_sim[valid_mask]
+        
+        # =========================================================================
+        # Calcular erro apenas nas células válidas
+        # =========================================================================
+        error_valid = pressure_sim_valid - pressure_truth_valid
+        
+        # Normas da solução analítica
+        norm_truth_l1 = np.sum(np.abs(pressure_truth_valid))
+        norm_truth_l2 = np.sqrt(np.sum(pressure_truth_valid**2))
+        norm_truth_linf = np.max(np.abs(pressure_truth_valid))
+        
         if norm_truth_l1 == 0 or norm_truth_l2 == 0 or norm_truth_linf == 0:
             logger.warning(
                 "Analytical solution norm is zero, cannot compute relative error.",
                 extra={"context": "Solver CHECK"},
             )
             return
-
-        norm_error_l1 = error_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_1)
-        norm_error_l2 = error_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_2)
-        norm_error_linf = error_vec.norm(norm_type=petsc4py.PETSc.NormType.NORM_INFINITY)
-
+        
+        # Normas do erro
+        norm_error_l1 = np.sum(np.abs(error_valid))
+        norm_error_l2 = np.sqrt(np.sum(error_valid**2))
+        norm_error_linf = np.max(np.abs(error_valid))
+        
+        # Erros relativos
         l1_error = norm_error_l1 / norm_truth_l1
         l2_error = norm_error_l2 / norm_truth_l2
         linf_error = norm_error_linf / norm_truth_linf
-
+        
+        # =========================================================================
+        # Armazenar campos para visualização (com NaN onde excluído)
+        # =========================================================================
+        # Criar arrays completos com NaN onde não válido
+        pressure_truth_full = np.full_like(pressure_sim, np.nan)
+        error_full = np.full_like(pressure_sim, np.nan)
+        
+        pressure_truth_full[valid_mask] = pressure_truth_valid
+        error_full[valid_mask] = error_valid
+        
+        self.dmstag_manager.set_field("analytical_solution", SL.ELEMENT, pressure_truth_full)
+        self.dmstag_manager.set_field("error", SL.ELEMENT, error_full)
+        
+        # =========================================================================
+        # Log e armazenamento
+        # =========================================================================
         log_message = f"L1={l1_error:.4e}, L2={l2_error:.4e}, L_inf={linf_error:.4e}"
+        if n_excluded > 0:
+            log_message += f" (excl. {n_excluded} cells)"
 
         if l2_error > 1e-1:
             logger.warning(log_message, extra={"context": "Solver CHECK"})

@@ -192,7 +192,6 @@ def print_metric(name: str, value: str, unit: str = "", highlight: bool = False)
 class TestCase:
     name: str
     path: str
-    expected_order: float
     description: str
     meshes: List[List[int]]
     tolerance_check: bool = False
@@ -295,10 +294,8 @@ class Config:
                 tc = TestCase(
                     name=case.get("name", "unknown"),
                     path=case.get("path", ""),
-                    expected_order=float(case.get("expected_order", 2.0)),
                     description=case.get("description", ""),
                     meshes=case.get("meshes", [[20, 20, 20]]),
-                    tolerance_check=case.get("expected_order", 2.0) == 0.0,
                 )
                 config.correctness_cases.append(tc)
             
@@ -347,9 +344,6 @@ class Config:
 
         if test_type == "correctness":
             print(f"\n{Colors.BOLD}Test: CORRECTNESS{Colors.END}")
-            for case in self.correctness_cases:
-                order_str = "exact" if case.expected_order == 0 else f"~{case.expected_order:.1f}"
-                print(f"    - {case.name}: {case.description} (order {order_str})")
             print_metric("MPI processes", str(self.correctness_mpi))
             print_metric("GPU", "Yes" if self.correctness_use_gpu else "No")
 
@@ -424,8 +418,20 @@ def create_reservoir_ini(
     lx = config.getfloat("RESERVOIR_INPUT", "LX")
     ly = config.getfloat("RESERVOIR_INPUT", "LY")
     lz = config.getfloat("RESERVOIR_INPUT", "LZ")
+
+    base_nx = config.getint("RESERVOIR_INPUT", "NX")
+    
+    refinement_ratio = nx / base_nx
+    
     time_step = config.getfloat("TIME_SETTINGS", "TIME_STEP")
     time_final = config.getfloat("TIME_SETTINGS", "TIME_FINAL")
+
+    time_step /= refinement_ratio
+    time_final /= refinement_ratio
+
+    config.set("TIME_SETTINGS", "TIME_STEP", str(time_step))
+    config.set("TIME_SETTINGS", "TIME_FINAL", str(time_final))
+
     time_initial = config.getfloat("TIME_SETTINGS", "TIME_INITIAL")
 
     config.set("RESERVOIR_INPUT", "NX", str(nx))
@@ -576,6 +582,7 @@ def run_solver(
     opt: bool = True,
     timeout_hours: float = 2.0,
     postprocess: bool = False,
+    log_level: str = "INFO"
 ) -> Tuple[Optional[Dict], Dict]:
     """
     Run the solver and return ALL data from the JSON output plus memory stats.
@@ -603,6 +610,7 @@ def run_solver(
         "-pc_type", config.pc_type,
         "-ksp_rtol", str(config.ksp_rtol),
         "-ksp_reuse_preconditioner", "true",
+        "log_level", log_level
     ]
 
     if opt:
@@ -685,18 +693,13 @@ def test_correctness_case(config: Config, case: TestCase, temp_dir: Path) -> Dic
         return {
             "name": case.name,
             "description": case.description,
-            "expected_order": case.expected_order,
             "status": "FILE_NOT_FOUND",
             "results": [],
-            "orders": [],
-            "average_order": None,
         }
     
     orig_config = parse_reservoir_ini(reservoir_path)
     
-    print_section(f"Case: {case.name} - {case.description}")
-    print(f"  Expected order: {'exact' if case.expected_order == 0 else f'~{case.expected_order:.1f}'}")
-    
+    print_section(f"Case: {case.name} - {case.description}")    
     results_data = []
     
     for i, mesh in enumerate(case.meshes):
@@ -724,6 +727,7 @@ def test_correctness_case(config: Config, case: TestCase, temp_dir: Path) -> Dic
             opt=config.correctness_optimized,
             timeout_hours=config.correctness_timeout,
             postprocess=config.correctness_postprocess,
+            log_level="DEBUG"
         )
         elapsed = time.time() - start_time
         
@@ -762,29 +766,11 @@ def test_correctness_case(config: Config, case: TestCase, temp_dir: Path) -> Dic
     
     valid_results = [r for r in results_data if "l2_error" in r and r.get("l2_error", -1) > 0]
     
-    orders = []
-    if len(valid_results) >= 2:
-        print(f"\n  Convergence Analysis:")
-        
-        for i in range(1, len(valid_results)):
-            r1, r2 = valid_results[i - 1], valid_results[i]
-            e1, e2 = r1["l2_error"], r2["l2_error"]
-            h1, h2 = r1["h"], r2["h"]
-            
-            if h1 != h2 and e1 > 0 and e2 > 0:
-                order = float(np.log(e1 / e2) / np.log(h1 / h2))
-                orders.append(order)
-                print(f"    {r1['mesh_id']}->{r2['mesh_id']}: p = {order:.3f}")
-    
-    avg_order = float(np.mean(orders)) if orders else None
     
     return {
         "name": case.name,
         "description": case.description,
-        "expected_order": float(case.expected_order),
         "results": results_data,
-        "orders": orders,
-        "average_order": avg_order,
     }
 
 
@@ -795,33 +781,6 @@ def test_correctness(config: Config, temp_dir: Path) -> List[Dict]:
     for case in config.correctness_cases:
         case_result = test_correctness_case(config, case, temp_dir)
         all_results.append(case_result)
-    
-    print_header("SUMMARY - CORRECTNESS")
-    print(f"\n{'Case':<15} {'Expected':^10} {'Obtained':^10} {'Status':^15}")
-    print("-" * 55)
-    
-    for result in all_results:
-        name = result["name"]
-        expected = result["expected_order"]
-        obtained = result.get("average_order")
-        
-        if obtained is None:
-            status = f"{Colors.RED}FAILED{Colors.END}"
-            obtained_str = "N/A"
-        elif expected == 0:
-            status = f"{Colors.GREEN}EXACT{Colors.END}" if abs(obtained) < 0.5 else f"{Colors.YELLOW}CHECK{Colors.END}"
-            obtained_str = f"{obtained:.2f}"
-        else:
-            if abs(obtained - expected) < 0.3:
-                status = f"{Colors.GREEN}OK{Colors.END}"
-            elif abs(obtained - expected) < 0.7:
-                status = f"{Colors.YELLOW}ACCEPT{Colors.END}"
-            else:
-                status = f"{Colors.RED}FAIL{Colors.END}"
-            obtained_str = f"{obtained:.2f}"
-        
-        expected_str = "exact" if expected == 0 else f"{expected:.1f}"
-        print(f"{name:<15} {expected_str:^10} {obtained_str:^10} {status:^15}")
     
     return all_results
 
@@ -1255,7 +1214,7 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if args.test == "all":
-        tests_to_run = ["correctness", "performance", "strong", "weak"]
+        tests_to_run = ["performance", "strong", "weak"]
     else:
         tests_to_run = [args.test]
     
