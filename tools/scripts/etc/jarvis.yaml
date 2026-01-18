@@ -1,0 +1,110 @@
+paths:
+  run_script: "../run.py"
+  results_dir: "./results_jarvis"
+  temp_dir: "/tmp"
+
+hardware:
+  physical_cores: 32
+  logical_cpus: 64
+  numa_nodes: 2
+  cores_per_numa: 16
+  num_gpus: 4
+  vram_per_gpu_gb: 16
+  total_vram_gb: 64
+  total_ram_gb: 251
+
+mpi:
+  processes: [1, 2, 4, 8, 16]
+  omp_num_threads: 1
+  bind_to: "none"
+  map_by: "none"
+
+gpu:
+  use_mps: true
+  vec_type: "cuda"
+  mat_type: "aijcusparse"
+
+solver:
+  ksp_type: "fgmres"
+  pc_type: "gamg"
+  ksp_rtol: 1.0e-8
+  ksp_max_it: 1000
+
+correctness:
+  cases:
+    - name: "example_1"
+      path: "examples/example_1/reservoir.ini"
+      expected_order: 0.0
+      description: "Linear (exact solution for TPFA)"
+      meshes:
+        - [10, 10, 10]
+        - [20, 20, 20]
+        - [40, 40, 40]
+        - [60, 60, 60]
+
+    - name: "example_2"
+      path: "examples/example_2/reservoir.ini"
+      expected_order: 0.0
+      description: "Quadratic (exact solution for TPFA)"
+      meshes:
+        - [10, 10, 10]
+        - [20, 20, 20]
+        - [40, 40, 40]
+        - [60, 60, 60]
+
+    - name: "example_3"
+      path: "examples/example_3/reservoir.ini"
+      expected_order: 2.0
+      description: "Nonlinear (spatial convergence)"
+      meshes:
+        - [20, 20, 10]
+        - [30, 30, 15]
+        - [40, 40, 20]
+        - [60, 60, 30]
+        - [80, 80, 40]
+
+    - name: "example_Li"
+      path: "examples/example_Li/reservoir.ini"
+      expected_order: 2.0
+      description: "Li Case 4 (2D well)"
+      meshes:
+        - [25, 25, 1]
+        - [50, 50, 1]
+        - [100, 100, 1]
+        - [150, 150, 1]
+        - [200, 200, 1]
+
+  use_gpu: false
+  mpi_processes: 4
+  optimized: false
+  postprocess: false
+  timeout_hours: 2.0
+
+performance:
+  reservoir_base: "examples/example_3/reservoir.ini"
+  mesh: [200, 200, 200]
+  mpi_processes: [1, 2, 4, 8, 16]
+  runs: 3
+  optimized: true
+  timeout_hours: 10.0
+
+strong_scaling:
+  reservoir_base: "examples/example_3/reservoir.ini"
+  mesh: [270, 270, 270]
+  mpi_processes: [1, 2, 3, 4]
+  runs: 3
+  optimized: true
+  timeout_hours: 10.0
+
+weak_scaling:
+  reservoir_base: "examples/example_3/reservoir.ini"
+  base_mesh: [170, 170, 170]
+  mpi_processes: [1, 2, 3, 4]
+  runs: 3
+  decomposition:
+    1: [170, 170, 170]
+    2: [215, 215, 215]
+    3: [245, 245, 245]
+    4: [270, 270, 270]
+  optimized: true
+  timeout_hours: 10.0

@@ -139,17 +139,18 @@ class ReservoirINIParser:
         self, reservoir_input: ReservoirInput, initial_condition: InitialCondition
     ) -> Dict:
         return {
-            "p_ref": initial_condition.pressure,
+            "initial_pressure": initial_condition.pressure,
             "fluid_compressibility": reservoir_input.cfluid,
-            "porosity_compressibility": reservoir_input.cporo,
+            "pore_compressibility": reservoir_input.cporo,
             "rho_ref": reservoir_input.rho,
-            "mu_ref": reservoir_input.mu,
+            "viscosity": reservoir_input.mu,
             "phi_ref": reservoir_input.poro,
             "permeability": (
                 reservoir_input.kx,
                 reservoir_input.ky,
                 reservoir_input.kz,
             ),
+            "formation_volume_factor": reservoir_input.b,
         }
 
     def _parse_description(self) -> ReservoirDescription:

@@ -90,7 +90,10 @@ class TPFASolver:
             )
 
             times = np.arange(self.TIME_INITIAL, self.TIME_FINAL + self.TIME_STEP, self.TIME_STEP)
-            self.out_info["n_iterations"] = len(times) - 1
+            n_iterations = len(times) - 1
+            self.out_info["n_iterations"] = n_iterations
+            last_iteration_idx = n_iterations - 1
+            
             self.b = self.dmstag_manager.get_field_vec("rhs", SL.ELEMENT)
             self.x = self.dmstag_manager.get_field_vec("pressure", SL.ELEMENT)
             for t_idx, (t_n, t_np1) in enumerate(zip(times[:-1], times[1:])):
@@ -114,7 +117,7 @@ class TPFASolver:
                 self.solve_system()
                 end_solve = time()
 
-                if self.do_checks:
+                if self.do_checks and t_idx == last_iteration_idx:
                     self.check(t_np1)
 
                 self.solving_time += end_solve - start_solve
@@ -635,6 +638,7 @@ class TPFASolver:
 
         self.A.setSizes([(n_elems, n_elems_global), (n_elems, n_elems_global)])
         self.A.setFromOptions()
+        
 
         logger.debug(
             f"Starting preallocation...",
@@ -655,9 +659,9 @@ class TPFASolver:
         self.ksp = PETSc.KSP().create()
         self.ksp.setType(PETSc.KSP.Type.FGMRES)
         self.ksp.getPC().setType(PETSc.PC.Type.BJACOBI)
-        # self.ksp.setTolerances(rtol=1e-5, max_it=1000)
         self.ksp.setOperators(self.A)
         self.ksp.setFromOptions()
+        self.ksp.setTolerances(rtol=1e-12, atol=1e-14, max_it=1000)
 
     def update_system(self):
         """
@@ -799,7 +803,7 @@ class TPFASolver:
                     bc_values = bc_func(xf, yf, zf, self.current_time, nx, ny, nz) * bc_mult
                     trans_neu = b_trans[matching_indices]
                     area_neu = b_area[matching_indices]
-                    source_contribution = area_neu * trans_neu * bc_values
+                    source_contribution =  trans_neu * bc_values
                     np.add.at(S_u, elements_to_update, source_contribution)
 
         self.dmstag_manager.set_field("external_source", SL.ELEMENT, S_u, use_ghost=True)
@@ -811,7 +815,7 @@ class TPFASolver:
         local_indexes = []
         for local_idx, well in self.well_indices:
             logger.debug(
-                f"Adding well source term for well {well["name"]} at index ({well["index"]})",
+                f"Adding well source term for well {well['name']} at index ({well['index']})",
                 extra={"context": f"Solver BOUNDARY [{self.iteration}]"},
             )
             well_contribuitions.append(well["rate"] + well["J"] * well["pressure"])

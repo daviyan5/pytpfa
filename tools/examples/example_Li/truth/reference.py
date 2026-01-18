@@ -1,176 +1,248 @@
-#!/usr/bin/env python3
-"""
-Solução Analítica 3D - Extensão do Case Study 4 de Li (2012)
-
-Equação resolvida:
-    ∂P/∂t = η∇²P + (q·S/V)·δ(r - r_poço)
-
-Solução:
-    P = Pi + (q·S/V)·[t + (1/η)·Σ_séries]
-"""
-
+import os
 import configparser
 import numpy as np
 from pathlib import Path
+import matplotlib.pyplot as plt
+from PIL import Image
+import io
 
-_cache = None
+
+_params_cache = None
 
 
-def _load_params():
-    global _cache
-    if _cache is not None:
-        return _cache
+def _load_reservoir_parameters():
+    global _params_cache
 
-    ini_path = Path(__file__).parent.parent / "reservoir.ini"
+    if _params_cache is not None:
+        return _params_cache
+
+    current_dir = Path(__file__).parent
+    reservoir_ini_path = current_dir.parent / "reservoir.ini"
+
+    if not reservoir_ini_path.exists():
+        raise FileNotFoundError(f"Could not find reservoir.ini at {reservoir_ini_path}")
+
     config = configparser.ConfigParser()
-    config.read(ini_path)
+    config.read(reservoir_ini_path)
 
-    inp = config["RESERVOIR_INPUT"]
-    well = config["WELL_1"]
+    input_section = config["RESERVOIR_INPUT"]
+    well_section = config["WELL_1"]
 
-    # Geometria
-    a = inp.getfloat("LX")
-    b = inp.getfloat("LY")
-    c = inp.getfloat("LZ")
+    a = input_section.getfloat("LX")
+    b = input_section.getfloat("LY")
+    h = input_section.getfloat("LZ")
 
-    # Posição do poço
-    l = well.getfloat("BLOCK_COORD_X")
-    m = well.getfloat("BLOCK_COORD_Y")
-    p = well.getfloat("BLOCK_COORD_Z")
+    l = a / 2.0
+    q = b / 2.0
 
-    # Propriedades
-    Pi = config["INITIAL_CONDITION"].getfloat("PRESSURE")
-    phi = inp.getfloat("PORO")
-    k = inp.getfloat("KX")
-    mu = inp.getfloat("MU")
-    B = inp.getfloat("B")
-    c_t = inp.getfloat("CPORO") + inp.getfloat("CFLUID")
+    Pi = (
+        input_section.getfloat("PRESSURE")
+        if "PRESSURE" in input_section
+        else config["INITIAL_CONDITION"].getfloat("PRESSURE")
+    )
+    Bo = input_section.getfloat("B")
+    mu = input_section.getfloat("MU")
+    por = input_section.getfloat("PORO")
+    k = input_section.getfloat("KX")
+    cf = input_section.getfloat("CFLUID")
+    cr = input_section.getfloat("CPORO")
+    c = cr + cf
 
-    # Vazão
-    q = well.getfloat("VALUE")
+    well_rate_field_units = abs(well_section.getfloat("VALUE"))
 
-    # Coeficientes (consistentes com TPFASolver)
-    ALPHA_C = 5.615
-    BETA_C = 1.127
-    eta = (BETA_C * ALPHA_C * k) / (phi * mu * c_t)
-    S = (ALPHA_C * B) / (phi * c_t)
+    Qj = well_rate_field_units * 5.614
+    Q = -Bo * Qj / 5.614 / h
 
-    _cache = {"a": a, "b": b, "c": c, "l": l, "m": m, "p": p, "Pi": Pi, "q": q, "eta": eta, "S": S}
-    return _cache
+    alpha = 157.952 * (por * c * mu) / k
+    beta = 886.905 * (Bo * mu) / k
+
+    _params_cache = {
+        "a": a,
+        "b": b,
+        "h": h,
+        "l": l,
+        "q": q,
+        "Pi": Pi,
+        "Bo": Bo,
+        "mu": mu,
+        "por": por,
+        "k": k,
+        "cf": cf,
+        "cr": cr,
+        "c": c,
+        "Q": Q,
+        "Qj": Qj,
+        "alpha": alpha,
+        "beta": beta,
+    }
+
+    return _params_cache
 
 
 def analytical(x, y, z, t):
-    """
-    P(x,y,z,t) = Pi + (q·S/V)·[t + (1/η)·(2d + 2f + 2h + 4gxy + 4gxz + 4gyz + 8gxyz)]
-    """
-    par = _load_params()
-    a, b, c = par["a"], par["b"], par["c"]
-    l, m, p = par["l"], par["m"], par["p"]
-    Pi, q, eta, S = par["Pi"], par["q"], par["eta"], par["S"]
+    params = _load_reservoir_parameters()
+    a = params["a"]
+    b = params["b"]
+    l = params["l"]
+    q = params["q"]
+    Pi = params["Pi"]
+    Q = params["Q"]
+    alpha = params["alpha"]
+    beta = params["beta"]
 
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
-    z = np.asarray(z, dtype=float)
     t = float(t)
 
     if t == 0.0:
-        shape = np.broadcast(x, y, z).shape
-        return np.full(shape, Pi) if shape else Pi
+        result_shape = np.broadcast(x, y).shape
+        return np.full(result_shape, Pi, dtype=float)
 
-    V = a * b * c
-    N = 30  # termos da série
-    pi2 = np.pi**2
+    x_bcast, y_bcast = np.broadcast_arrays(x, y)
 
-    # Índices
-    i = np.arange(1, N + 1)
-    j = np.arange(1, N + 1)
-    k_idx = np.arange(1, N + 1)
+    series_terms = 100
+    m = np.arange(1, series_terms + 1)
+    n = np.arange(1, series_terms + 1)
+    pi_sq = np.pi**2
 
-    # Função auxiliar: (1 - exp(-π²ηλ²t)) / (π²λ²)
-    def E(lam2):
-        return (1.0 - np.exp(-pi2 * eta * lam2 * t)) / (pi2 * lam2)
+    m_col = m.reshape(-1, 1)
+    n_col = n.reshape(-1, 1)
 
-    # Broadcast arrays
-    x, y, z = np.broadcast_arrays(x, y, z)
-    flat_x, flat_y, flat_z = x.ravel(), y.ravel(), z.ravel()
-    n_pts = flat_x.size
+    m_op_shape = (-1,) + (1,) * x_bcast.ndim
+    n_op_shape = (-1,) + (1,) * y_bcast.ndim
+    m_op = m.reshape(m_op_shape)
+    n_op = n.reshape(n_op_shape)
 
-    # Pré-calcular cossenos no poço
-    cos_il = np.cos(i * np.pi * l / a)
-    cos_jm = np.cos(j * np.pi * m / b)
-    cos_kp = np.cos(k_idx * np.pi * p / c)
+    m2_a2 = m_col**2 / a**2
+    C_d_m = (
+        (1 / (pi_sq * m2_a2))
+        * (1 - np.exp(-pi_sq / alpha * m2_a2 * t))
+        * np.cos(m_col * np.pi * l / a)
+    )
+    cos_mx = np.cos(m_op * np.pi * x_bcast / a)
+    d = np.einsum("m,m...->...", C_d_m.flatten(), cos_mx)
 
-    # λ² para séries 1D
-    lam2_i = (i / a) ** 2
-    lam2_j = (j / b) ** 2
-    lam2_k = (k_idx / c) ** 2
+    n2_b2 = n_col**2 / b**2
+    C_f_n = (
+        (1 / (pi_sq * n2_b2))
+        * (1 - np.exp(-pi_sq / alpha * n2_b2 * t))
+        * np.cos(n_col * np.pi * q / b)
+    )
+    cos_ny = np.cos(n_op * np.pi * y_bcast / b)
+    f = np.einsum("n,n...->...", C_f_n.flatten(), cos_ny)
 
-    # Cossenos para todos os pontos: shape (N, n_pts)
-    cos_ix = np.cos(np.outer(i * np.pi / a, flat_x))
-    cos_jy = np.cos(np.outer(j * np.pi / b, flat_y))
-    cos_kz = np.cos(np.outer(k_idx * np.pi / c, flat_z))
-
-    # === Séries 1D ===
-    d = np.sum((E(lam2_i) * cos_il)[:, None] * cos_ix, axis=0)
-    f = np.sum((E(lam2_j) * cos_jm)[:, None] * cos_jy, axis=0)
-    h = np.sum((E(lam2_k) * cos_kp)[:, None] * cos_kz, axis=0)
-
-    # === Séries 2D ===
-    # g_xy
-    I, J = np.meshgrid(i, j, indexing="ij")
-    lam2_ij = (I / a) ** 2 + (J / b) ** 2
-    C_ij = E(lam2_ij) * np.cos(I * np.pi * l / a) * np.cos(J * np.pi * m / b)
-    g_xy = np.einsum("ij,ip,jp->p", C_ij, cos_ix, cos_jy)
-
-    # g_xz
-    I, K = np.meshgrid(i, k_idx, indexing="ij")
-    lam2_ik = (I / a) ** 2 + (K / c) ** 2
-    C_ik = E(lam2_ik) * np.cos(I * np.pi * l / a) * np.cos(K * np.pi * p / c)
-    g_xz = np.einsum("ik,ip,kp->p", C_ik, cos_ix, cos_kz)
-
-    # g_yz
-    J, K = np.meshgrid(j, k_idx, indexing="ij")
-    lam2_jk = (J / b) ** 2 + (K / c) ** 2
-    C_jk = E(lam2_jk) * np.cos(J * np.pi * m / b) * np.cos(K * np.pi * p / c)
-    g_yz = np.einsum("jk,jp,kp->p", C_jk, cos_jy, cos_kz)
-
-    # === Série 3D ===
-    N3 = 15  # menos termos para 3D
-    i3, j3, k3 = np.arange(1, N3 + 1), np.arange(1, N3 + 1), np.arange(1, N3 + 1)
-    I3, J3, K3 = np.meshgrid(i3, j3, k3, indexing="ij")
-    lam2_ijk = (I3 / a) ** 2 + (J3 / b) ** 2 + (K3 / c) ** 2
-    C_ijk = (
-        E(lam2_ijk)
-        * np.cos(I3 * np.pi * l / a)
-        * np.cos(J3 * np.pi * m / b)
-        * np.cos(K3 * np.pi * p / c)
+    n_row = n.reshape(1, -1)
+    lambda_mn_sq = (m_col**2 / a**2) + (n_row**2 / b**2)
+    C_mn = (
+        (1 / (pi_sq * lambda_mn_sq))
+        * (1 - np.exp(-pi_sq / alpha * lambda_mn_sq * t))
+        * np.cos(m_col * np.pi * l / a)
+        * np.cos(n_row * np.pi * q / b)
     )
 
-    cos_ix3 = np.cos(np.outer(i3 * np.pi / a, flat_x))
-    cos_jy3 = np.cos(np.outer(j3 * np.pi / b, flat_y))
-    cos_kz3 = np.cos(np.outer(k3 * np.pi / c, flat_z))
-    g_xyz = np.einsum("ijk,ip,jp,kp->p", C_ijk, cos_ix3, cos_jy3, cos_kz3)
+    V_mx = np.cos(m_op * np.pi * x_bcast / a)
+    W_ny = np.cos(n_op * np.pi * y_bcast / b)
+    g = np.einsum("mn,m...,n...->...", C_mn, V_mx, W_ny)
 
-    # === Solução ===
-    series = 2 * d + 2 * f + 2 * h + 4 * g_xy + 4 * g_xz + 4 * g_yz + 8 * g_xyz
-    P = Pi + (q * S / V) * (t + series / eta)
+    P_result = Pi - beta * Q / (a * b) * (t / alpha + 2 * d + 2 * f + 4 * g)
 
-    result = P.reshape(x.shape)
-    return float(result) if result.ndim == 0 else result
+    if P_result.ndim == 0 or P_result.size == 1:
+        return P_result.item()
+    else:
+        return P_result
+
+
+def get_parameters():
+    return _load_reservoir_parameters().copy()
 
 
 if __name__ == "__main__":
-    par = _load_params()
-    print(f"Domínio: {par['a']} x {par['b']} x {par['c']} ft")
-    print(f"Poço em: ({par['l']}, {par['m']}, {par['p']}) ft")
-    print(f"η = {par['eta']:.2e} ft²/dia")
-    print(f"τ = L²/η = {(par['a']/2)**2 / par['eta']:.2f} dias")
-    print()
+    print("Testing Case Study 4 analytical solution...")
 
-    t = 365.0
-    P_centro = analytical(par["l"], par["m"], par["p"], t)
-    P_canto = analytical(0, 0, 0, t)
-    print(f"t = {t} dias:")
-    print(f"  P(centro) = {P_centro:.2f} psi")
-    print(f"  P(canto)  = {P_canto:.2f} psi")
-    print(f"  ΔP = {par['Pi'] - P_centro:.2f} psi")
+    try:
+        params = get_parameters()
+        print("Loaded parameters:")
+        for key, value in params.items():
+            print(f"  {key}: {value}")
+
+        test_points = [
+            (1000, 840, 0, 365),
+            (0, 840, 0, 365),
+            (2000, 840, 0, 365),
+            (1000, 1000, 0, 365),
+        ]
+
+        print(f"\nTest results at t=365 days:")
+        for x, y, z, t in test_points:
+            p = analytical(x, y, z, t)
+            print(f"  P({x}, {y}, {z}, {t}) = {p:.2f} psi")
+
+        x_array = np.linspace(0, 2000, 5)
+        y_fixed = 840.0
+        z_fixed = 0.0
+        t_fixed = 365.0
+
+        p_array = analytical(x_array, y_fixed, z_fixed, t_fixed)
+        print(f"\nPressure profile at y={y_fixed} ft, t={t_fixed} days:")
+        for i, (xi, pi) in enumerate(zip(x_array, p_array)):
+            print(f"  x={xi:6.1f} ft: P={pi:.2f} psi")
+
+        grid_resolution = 100
+        x = np.linspace(0, 2000, grid_resolution)
+        y = np.linspace(0, 2000, grid_resolution)
+        X, Y = np.meshgrid(x, y)
+        Z = np.zeros_like(X)
+
+        times = np.linspace(0, 365, 50)
+        vmin, vmax = 2000, 2200
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        frames = []
+
+        for i, t in enumerate(times):
+            ax.clear()
+
+            P = analytical(X, Y, Z, t)
+
+            p_min, p_max, p_avg = P.min(), P.max(), P.mean()
+            print(
+                f"Frame {i+1}/{len(times)} (t={t:5.1f} days) | "
+                f"Min: {p_min:7.2f}, Max: {p_max:7.2f}, Avg: {p_avg:7.2f} psi"
+            )
+
+            P_clipped = np.clip(P, vmin, vmax)
+
+            im = ax.contourf(X, Y, P_clipped, levels=20, cmap="viridis", vmin=vmin, vmax=vmax)
+            ax.set_title(f"Pressure Evolution - t = {t:.1f} days")
+            ax.set_xlabel("X (ft)")
+            ax.set_ylabel("Y (ft)")
+            ax.set_aspect("equal")
+
+            if i == 0:
+                cbar = fig.colorbar(im, ax=ax, shrink=0.8, label="Pressure (psi)")
+
+            plt.draw()
+            plt.pause(0.01)
+
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+            buf.seek(0)
+            frames.append(Image.open(buf))
+
+        gif_path = "pressure_animation_fine.gif"
+        frames[0].save(
+            gif_path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=200,
+            loop=0,
+        )
+
+        print(f"\nAnimation saved as {gif_path}")
+        plt.show()
+
+    except Exception as e:
+        print(f"\nError: {e}")
+        import traceback
+
+        traceback.print_exc()

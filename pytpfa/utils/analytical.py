@@ -1,103 +1,163 @@
+"""
+analytical.py - VERSÃO CORRIGIDA
+
+Este módulo gera funções analíticas para o método de soluções manufaturadas.
+A formulação corresponde exatamente à equação implementada no solver.
+
+A equação do solver (em unidades de campo) é:
+    V/αc · ∂/∂t[φ/B] - βc · ∇·[k/(μB) · ∇p] = q_sc
+
+Onde:
+    αc = 5.615 (conversão bbl → ft³)
+    βc = 1.127 (fator de transmissibilidade em unidades de campo)
+    B = B_ref / (1 + c_f · (p - p_ref))  (formation volume factor)
+    φ = φ_ref · (1 + c_φ · (p - p_ref))  (porosidade)
+"""
+
 import numpy as np
 import sympy as sp
 
-x, y, z, t = sp.symbols("x y z t")
-nx, ny, nz = sp.symbols("nx ny nz")  # Normal vector components
+ALPHA_C = 5.615
+BETA_C = 1.127
 
-
-def analytical(p_expr, params=None):
+def _ensure_sympy_expr(expr):
     """
-    Converts a SymPy expression for p(x,y,z,t) into a numerical function.
+    Garante que expr seja uma expressão SymPy.
+    Se for string, converte para expressão SymPy.
     """
-    return sp.lambdify((x, y, z, t), p_expr, "numpy")
+    if isinstance(expr, str):
+        x, y, z, t = sp.symbols("x y z t")
+        expr_clean = expr.lower().replace("^", "**")
+        return sp.sympify(expr_clean, locals={"x": x, "y": y, "z": z, "t": t})
+    return expr
 
 
-def initial_condition(p_expr, params=None):
+def analytical(expr, params=None):
     """
-    Returns the analytical solution for the initial condition.
-    This is just the expression evaluated at t=0.
+    Converte uma expressão SymPy p(x,y,z,t) em uma função numérica.
     """
-    if isinstance(p_expr, str):
-        p_expr = sp.sympify(p_expr)
-    return sp.lambdify((x, y, z), p_expr.subs(t, 0), "numpy")
+    expr = _ensure_sympy_expr(expr)
+    x_sym, y_sym, z_sym, t_sym = sp.symbols("x y z t")
+    func = sp.lambdify((x_sym, y_sym, z_sym, t_sym), expr, "numpy")
+    return func
 
 
-def dirichlet(p_expr, params=None):
+def initial_condition(expr, params=None):
     """
-    The Dirichlet condition is just the analytical solution itself, evaluated at the boundary.
+    Condição inicial: p(x, y, z, t=0)
     """
-    return analytical(p_expr)
+    expr = _ensure_sympy_expr(expr)
+    x_sym, y_sym, z_sym, t_sym = sp.symbols("x y z t")
+    initial = expr.subs(t_sym, 0)
+    
+    if initial.is_constant():
+        const_val = float(initial)
+        return lambda x, y, z: np.full_like(np.asarray(x, dtype=float), const_val)
+    
+    func = sp.lambdify((x_sym, y_sym, z_sym), initial, "numpy")
+    return func
 
 
-def neumann(p_expr, params):
+def dirichlet(expr, params=None):
     """
-    Calculates the normal flux (e.g., K * grad(p) · n) and returns a numerical function.
-    Note: This is for a simplified flux term. Your Eq. 8.1 is more complex.
+    Condição de contorno de Dirichlet: p = p_boundary
     """
-    kx, ky, kz = params["permeability"]
-    mu_ref = params["mu_ref"]
-
-    flux_vec_x = -(kx / mu_ref) * sp.diff(p_expr, x)
-    flux_vec_y = -(ky / mu_ref) * sp.diff(p_expr, y)
-    flux_vec_z = -(kz / mu_ref) * sp.diff(p_expr, z)
-
-    normal_flux = flux_vec_x * nx + flux_vec_y * ny + flux_vec_z * nz
-
-    return sp.lambdify((x, y, z, t, nx, ny, nz), normal_flux, "numpy")
+    expr = _ensure_sympy_expr(expr)
+    x_sym, y_sym, z_sym, t_sym = sp.symbols("x y z t")
+    func = sp.lambdify((x_sym, y_sym, z_sym, t_sym), expr, "numpy")
+    return func
 
 
-def source_term(p_expr, params):
+def neumann(expr, params):
     """
-    Calculates the source term q by rearranging the PDE: q = Accumulation + Divergence_of_Flux
-    This assumes a PDE of the form: ∂(φρ)/∂t - ∇·(ρk/μ ∇p) = q
+    Condição de contorno de Neumann: derivada normal da pressão (∂p/∂n)
     """
-    p_ref = p_expr.subs(t, 0)
-    c_phi = params["porosity_compressibility"]
-    c_rho = params["fluid_compressibility"]
-    rho_ref = params["rho_ref"]
-    mu_ref = params["mu_ref"]
+    expr = _ensure_sympy_expr(expr)
+    x_sym, y_sym, z_sym, t_sym, nx_sym, ny_sym, nz_sym = sp.symbols("x y z t nx ny nz")
+    
+    dpdx = sp.diff(expr, x_sym)
+    dpdy = sp.diff(expr, y_sym)
+    dpdz = sp.diff(expr, z_sym)
+    
+    normal_derivative = dpdx * nx_sym + dpdy * ny_sym + dpdz * nz_sym
+    
+    func = sp.lambdify(
+        (x_sym, y_sym, z_sym, t_sym, nx_sym, ny_sym, nz_sym), 
+        normal_derivative, 
+        "numpy"
+    )
+    return func
+
+
+def source_term(expr, params):
+    """
+    Calcula o termo fonte q para que a solução analítica seja satisfeita.
+    
+    A equação do solver é:
+        (1/αc) · ∂/∂t[φ/B] - βc · ∇·[k/(μB) · ∇p] = q_sc / V
+    
+    PARÂMETROS ESPERADOS:
+        phi_ref: porosidade de referência
+        pore_compressibility: c_φ
+        fluid_compressibility: c_f
+        formation_volume_factor: B_ref
+        permeability: k (escalar ou tupla)
+        viscosity: μ
+        initial_pressure: p_ref (pode ser escalar, callable, ou None)
+    """
+    expr = _ensure_sympy_expr(expr)
+    x_sym, y_sym, z_sym, t_sym = sp.symbols("x y z t")
+    
+    # Extrair parâmetros
     phi_ref = params["phi_ref"]
-    kx, ky, kz = params["permeability"]
-
-    rho = rho_ref * (1 + c_rho * (p_expr - p_ref))
-    phi = phi_ref * (1 + c_phi * (p_expr - p_ref))
-    mu = mu_ref
-
-    accumulation = sp.diff(phi * rho, t)
-
-    flux_vec_x = -(rho * kx / mu) * sp.diff(p_expr, x)
-    flux_vec_y = -(rho * ky / mu) * sp.diff(p_expr, y)
-    flux_vec_z = -(rho * kz / mu) * sp.diff(p_expr, z)
-
-    div_flux = -(sp.diff(flux_vec_x, x) + sp.diff(flux_vec_y, y) + sp.diff(flux_vec_z, z))
-
-    source_expr = accumulation - div_flux
-
-    return sp.lambdify((x, y, z, t), source_expr, "numpy")
-
-
-if __name__ == "__main__":
-    p_manufactured = sp.sin(x) * sp.sin(y) * sp.cos(t)
-
-    parameters = {
-        "permeability": (1.0e-12, 1.0e-12, 1.0e-12),
-        "rho_ref": 1000,  # kg/m^3
-        "p_ref": 1.0e5,  # Pa
-        "phi_ref": 0.2,
-        "mu_ref": 1.0e-3,  # Pa.s
-        "fluid_compressibility": 4.0e-10,  # 1/Pa
-        "porosity_compressibility": 3.0e-10,  # 1/Pa
-    }
-
-    p_sol = get_manufactured_solution(p_manufactured)
-    neumann_bc = get_neumann_condition(p_manufactured, parameters)
-    source = get_source_term(p_manufactured, parameters)
-
-    pressure_val = p_sol(0.5, 0.5, 0, 1.0)
-    print(f"Pressure at (0.5, 0.5, 0) at t=1s is: {pressure_val:.4f}")
-
-    source_val = source(0.5, 0.5, 0, 1.0)
-    print(f"Source term at (0.5, 0.5, 0) at t=1s is: {source_val:.4e}")
-
-    neumann_val = neumann_bc(1.0, 0.5, 0, 1.0, 1, 0, 0)
-    print(f"Neumann value at (1, 0.5, 0) for normal (1,0,0) at t=1s is: {neumann_val:.4e}")
+    c_phi = params["pore_compressibility"]
+    c_f = params["fluid_compressibility"]
+    B_ref = params["formation_volume_factor"]
+    mu = params["viscosity"]
+    
+    # Permeabilidade (pode ser escalar ou tensor)
+    k = params["permeability"]
+    if isinstance(k, (list, tuple)):
+        kx, ky, kz = k
+    else:
+        kx = ky = kz = k
+    
+    # Pressão de referência
+    p_ref_val = params.get("initial_pressure", None)
+    if p_ref_val is None:
+        # Se não especificado, usa a solução em t=0
+        p_ref = expr.subs(t_sym, 0)
+    elif callable(p_ref_val):
+        # Se é uma função, usa a solução em t=0 (não podemos avaliar função simbólica)
+        p_ref = expr.subs(t_sym, 0)
+    elif isinstance(p_ref_val, (int, float)):
+        p_ref = sp.Float(p_ref_val)
+    else:
+        p_ref = p_ref_val
+    
+    # Formation Volume Factor: B = B_ref / (1 + c_f · (p - p_ref))
+    B = B_ref / (1 + c_f * (expr - p_ref))
+    
+    # Porosidade: φ = φ_ref · (1 + c_φ · (p - p_ref))
+    phi = phi_ref * (1 + c_phi * (expr - p_ref))
+    
+    # TERMO DE ACUMULAÇÃO: (1/αc) · ∂(φ/B)/∂t
+    phi_over_B = phi / B
+    accumulation = sp.diff(phi_over_B, t_sym) / ALPHA_C
+    
+    # TERMO DE FLUXO: βc · ∇·[k/(μB) · ∇p]
+    dpdx = sp.diff(expr, x_sym)
+    dpdy = sp.diff(expr, y_sym)
+    dpdz = sp.diff(expr, z_sym)
+    
+    flux_x = BETA_C * (kx / (mu * B)) * dpdx
+    flux_y = BETA_C * (ky / (mu * B)) * dpdy
+    flux_z = BETA_C * (kz / (mu * B)) * dpdz
+    
+    div_flux = sp.diff(flux_x, x_sym) + sp.diff(flux_y, y_sym) + sp.diff(flux_z, z_sym)
+    
+    source = accumulation - div_flux
+    source = sp.simplify(source)
+    
+    func = sp.lambdify((x_sym, y_sym, z_sym, t_sym), source, "numpy")
+    return func

@@ -62,7 +62,7 @@ class DMStagManager:
             raise ValueError(f"Field {name} already exists.")
 
         logger.debug(
-            f"Adding {"shared" if is_shared else "local"} field {name} with size {size} on {"gpu" if gpu else "cpu"} at cell_dim {cell_dim}",
+            f"Adding {'shared' if is_shared else 'local'} field {name} with size {size} on {'gpu' if gpu else 'cpu'} at cell_dim {cell_dim}",
             extra={"context": "DMSTAG"},
         )
 

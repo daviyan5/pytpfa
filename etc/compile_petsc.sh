@@ -5,7 +5,7 @@ set -o pipefail
 
 usage() {
     echo "Error: Invalid arguments."
-    echo "Usage: $0 --petsc_dir=<PATH> --mode=<OPT|DEBUG> --target=<PERSONAL|APUANA> [--stage=<NUMBER>]"
+    echo "Usage: $0 --petsc_dir=<PATH> --mode=<OPT|DEBUG> --target=<PERSONAL|APUANA|JARVIS> [--stage=<NUMBER>]"
     echo "Example: $0 --petsc_dir=/home/user/petsc --mode=OPT --target=APUANA --stage=3"
     exit 1
 }
@@ -57,8 +57,8 @@ if [[ "$MODE" != "OPT" && "$MODE" != "DEBUG" ]]; then
     usage
 fi
 
-if [[ "$TARGET" != "PERSONAL" && "$TARGET" != "APUANA" ]]; then
-    echo "Error: Target must be 'PERSONAL' or 'APUANA'."
+if [[ "$TARGET" != "PERSONAL" && "$TARGET" != "APUANA" && "$TARGET" != "JARVIS" ]]; then
+    echo "Error: Target must be 'PERSONAL', 'APUANA', or 'JARVIS'."
     usage
 fi
 
@@ -74,6 +74,9 @@ export PETSC_DIR=$(realpath "${PETSC_DIR_ARG}")
 if [[ "$TARGET" == "APUANA" ]]; then
     LOG_DIR="$HOME/petsc_compile_logs"
     MAKE_NP="-j16"
+elif [[ "$TARGET" == "JARVIS" ]]; then
+    LOG_DIR="/tmp/compile_petsc"
+    MAKE_NP=""
 else
     LOG_DIR="/tmp/compile_petsc"
     MAKE_NP=""
@@ -85,6 +88,9 @@ if [[ "$MODE" == "DEBUG" ]]; then
     if [[ "$TARGET" == "APUANA" ]]; then
         export PETSC_ARCH="myconfiguredebugapuana"
         CONFIGURE_SCRIPT="${SCRIPT_DIR}/myconfiguredebugapuana.py"
+    elif [[ "$TARGET" == "JARVIS" ]]; then
+        export PETSC_ARCH="myconfiguredebugjarvis"
+        CONFIGURE_SCRIPT="${SCRIPT_DIR}/myconfiguredebugjarvis.py"
     else
         export PETSC_ARCH="myconfiguredebug"
         CONFIGURE_SCRIPT="${SCRIPT_DIR}/myconfiguredebug.py"
@@ -93,6 +99,9 @@ else
     if [[ "$TARGET" == "APUANA" ]]; then
         export PETSC_ARCH="myconfigureoptapuana"
         CONFIGURE_SCRIPT="${SCRIPT_DIR}/myconfigureoptapuana.py"
+    elif [[ "$TARGET" == "JARVIS" ]]; then
+        export PETSC_ARCH="myconfigureoptjarvis"
+        CONFIGURE_SCRIPT="${SCRIPT_DIR}/myconfigureoptjarvis.py"
     else
         export PETSC_ARCH="myconfigureopt"
         CONFIGURE_SCRIPT="${SCRIPT_DIR}/myconfigureopt.py"
