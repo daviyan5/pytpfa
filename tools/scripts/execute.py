@@ -635,6 +635,8 @@ def run_solver(
 
     cmd = [
         "mpiexec", "-n", str(mpi_processes),
+        "-bind-to", str(config.bind_to),
+        "-map-by", str(config.map_by),
         "-env", "OMP_NUM_THREADS", str(config.omp_num_threads),
         "-env", "OMP_PROC_BIND", "false",
         "-env", "OMP_PLACES", "threads",

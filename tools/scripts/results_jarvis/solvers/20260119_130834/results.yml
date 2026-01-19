@@ -1,0 +1,454 @@
+metadata:
+  config: jarvis
+  test_type: solvers
+  timestamp: '20260119_130834'
+  hostname: 8d4cc7ec1281
+  hardware:
+    physical_cores: 28
+    num_gpus: 4
+    vram_per_gpu_gb: 24
+    total_ram_gb: 251
+    gpu_model: Quadro RTX 6000
+    gpu_peak_bandwidth_gb_s: 672
+  solver_used:
+    ksp_type: cg
+    pc_type: jacobi
+    name: CG+JACOBI
+    source: solver_comparison
+results:
+  solver_comparison:
+    config:
+      mesh:
+        nx: 200
+        ny: 200
+        nz: 200
+      total_cells: 8000000
+      mpi_processes: 28
+      use_gpu: true
+      runs_per_solver: 1
+    solvers:
+    - name: FGMRES+GAMG
+      ksp_type: fgmres
+      pc_type: gamg
+      description: Flexible GMRES + Multigrid Algébrico (padrão)
+      runs:
+      - run_id: 0
+        times:
+          total: 44.325395822525024
+          solving: 26.72930359840393
+          preprocessing: 12.89859938621521
+          updating: 4.690458536148071
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 2672.930359840393
+        memory:
+          ram:
+            max_mb: 65753.12109375
+            avg_mb: 47213.63208912037
+            min_mb: 2.5
+            samples: 81
+          vram:
+            max_mb: 34062.0
+            avg_mb: 18885.333333333332
+            min_mb: 116.0
+            samples: 81
+            per_gpu:
+            - gpu: 0
+              max_mb: 11073.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 7673.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 7655.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 7661.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 26.72930359840393
+        std_solving_time: 0.0
+        avg_total_time: 44.325395822525024
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 2672.930359840393
+        speedup_vs_first: 1.0
+        max_ram_mb: 65753.12109375
+        successful_runs: 1
+        max_vram_mb: 34062.0
+        score: 0.8283091513950008
+    - name: CG+GAMG
+      ksp_type: cg
+      pc_type: gamg
+      description: Gradiente Conjugado + Multigrid Algébrico
+      runs:
+      - run_id: 0
+        times:
+          total: 51.40588688850403
+          solving: 33.678067207336426
+          preprocessing: 13.124675989151001
+          updating: 4.59372878074646
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 3367.8067207336426
+        memory:
+          ram:
+            max_mb: 65748.8984375
+            avg_mb: 48223.66564162234
+            min_mb: 2.0
+            samples: 94
+          vram:
+            max_mb: 27376.0
+            avg_mb: 18173.17021276596
+            min_mb: 116.0
+            samples: 94
+            per_gpu:
+            - gpu: 0
+              max_mb: 9369.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 6021.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 6003.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 5983.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 33.678067207336426
+        std_solving_time: 0.0
+        avg_total_time: 51.40588688850403
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 3367.8067207336426
+        speedup_vs_first: 0.7936709501126366
+        max_ram_mb: 65748.8984375
+        successful_runs: 1
+        max_vram_mb: 27376.0
+        score: 0.7307921302224257
+    - name: BCGS+GAMG
+      ksp_type: bcgs
+      pc_type: gamg
+      description: BiCGStab + Multigrid Algébrico
+      runs:
+      - run_id: 0
+        times:
+          total: 46.20763039588928
+          solving: 28.396727323532104
+          preprocessing: 13.114364862442017
+          updating: 4.687001466751099
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 2839.6727323532104
+        memory:
+          ram:
+            max_mb: 66535.85546875
+            avg_mb: 46889.33452943314
+            min_mb: 2.5
+            samples: 86
+          vram:
+            max_mb: 27738.0
+            avg_mb: 17377.18604651163
+            min_mb: 116.0
+            samples: 86
+            per_gpu:
+            - gpu: 0
+              max_mb: 9479.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 6079.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 6113.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 6067.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 28.396727323532104
+        std_solving_time: 0.0
+        avg_total_time: 46.20763039588928
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 2839.6727323532104
+        speedup_vs_first: 0.941281130528503
+        max_ram_mb: 66535.85546875
+        successful_runs: 1
+        max_vram_mb: 27738.0
+        score: 0.6596002155976523
+    - name: CG+BJACOBI
+      ksp_type: cg
+      pc_type: bjacobi
+      description: Gradiente Conjugado + Block Jacobi
+      runs:
+      - run_id: 0
+        times:
+          total: 42.047746658325195
+          solving: 24.345853567123413
+          preprocessing: 12.997985124588013
+          updating: 4.694843530654907
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 2434.5853567123413
+        memory:
+          ram:
+            max_mb: 55084.72265625
+            avg_mb: 43628.87950721154
+            min_mb: 1.0
+            samples: 78
+          vram:
+            max_mb: 14876.0
+            avg_mb: 11595.641025641025
+            min_mb: 116.0
+            samples: 78
+            per_gpu:
+            - gpu: 0
+              max_mb: 6271.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 2851.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 2877.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 2877.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 24.345853567123413
+        std_solving_time: 0.0
+        avg_total_time: 42.047746658325195
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 2434.5853567123413
+        speedup_vs_first: 1.097899628974156
+        max_ram_mb: 55084.72265625
+        successful_runs: 1
+        max_vram_mb: 14876.0
+        score: 0.20044867776320457
+    - name: GMRES+BJACOBI
+      ksp_type: gmres
+      pc_type: bjacobi
+      description: GMRES + Block Jacobi
+      runs:
+      - run_id: 0
+        times:
+          total: 55.881834268569946
+          solving: 37.68893766403198
+          preprocessing: 13.486770629882812
+          updating: 4.6977715492248535
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 3768.8937664031982
+        memory:
+          ram:
+            max_mb: 55497.5546875
+            avg_mb: 46495.64255878713
+            min_mb: 2.5
+            samples: 101
+          vram:
+            max_mb: 18356.0
+            avg_mb: 14789.762376237624
+            min_mb: 116.0
+            samples: 101
+            per_gpu:
+            - gpu: 0
+              max_mb: 7063.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 3721.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3799.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3773.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 37.68893766403198
+        std_solving_time: 0.0
+        avg_total_time: 55.881834268569946
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 3768.8937664031982
+        speedup_vs_first: 0.709208198879873
+        max_ram_mb: 55497.5546875
+        successful_runs: 1
+        max_vram_mb: 18356.0
+        score: 0.5156131113820377
+    - name: BCGS+BJACOBI
+      ksp_type: bcgs
+      pc_type: bjacobi
+      description: BiCGStab + Block Jacobi
+      runs:
+      - run_id: 0
+        times:
+          total: 55.35780215263367
+          solving: 37.7420334815979
+          preprocessing: 12.915758609771729
+          updating: 4.6923487186431885
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 3774.20334815979
+        memory:
+          ram:
+            max_mb: 55328.15234375
+            avg_mb: 46858.59135210396
+            min_mb: 2.5
+            samples: 101
+          vram:
+            max_mb: 15564.0
+            avg_mb: 12648.49504950495
+            min_mb: 116.0
+            samples: 101
+            per_gpu:
+            - gpu: 0
+              max_mb: 6425.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 3031.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 3025.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 3083.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 37.7420334815979
+        std_solving_time: 0.0
+        avg_total_time: 55.35780215263367
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 3774.20334815979
+        speedup_vs_first: 0.7082104786811895
+        max_ram_mb: 55328.15234375
+        successful_runs: 1
+        max_vram_mb: 15564.0
+        score: 0.43048029556650247
+    - name: CG+JACOBI
+      ksp_type: cg
+      pc_type: jacobi
+      description: Gradiente Conjugado + Jacobi (baseline)
+      runs:
+      - run_id: 0
+        times:
+          total: 35.607807874679565
+          solving: 18.499196767807007
+          preprocessing: 12.429074048995972
+          updating: 4.669636487960815
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 1849.9196767807007
+        memory:
+          ram:
+            max_mb: 53443.50390625
+            avg_mb: 41656.51556581439
+            min_mb: 2.5
+            samples: 66
+          vram:
+            max_mb: 11326.0
+            avg_mb: 8895.727272727272
+            min_mb: 116.0
+            samples: 66
+            per_gpu:
+            - gpu: 0
+              max_mb: 5363.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 1969.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 1995.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 1999.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 18.499196767807007
+        std_solving_time: 0.0
+        avg_total_time: 35.607807874679565
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 1849.9196767807007
+        speedup_vs_first: 1.4448899557044155
+        max_ram_mb: 53443.50390625
+        successful_runs: 1
+        max_vram_mb: 11326.0
+        score: 0.0
+    - name: GMRES+JACOBI
+      ksp_type: gmres
+      pc_type: jacobi
+      description: GMRES + Jacobi
+      runs:
+      - run_id: 0
+        times:
+          total: 49.643808126449585
+          solving: 31.247799396514893
+          preprocessing: 13.718299865722656
+          updating: 4.667822360992432
+        solver_info:
+          n_iterations: 10
+          time_per_iteration_ms: 3124.7799396514893
+        memory:
+          ram:
+            max_mb: 53847.12109375
+            avg_mb: 44188.87057864011
+            min_mb: 2.5
+            samples: 91
+          vram:
+            max_mb: 14664.0
+            avg_mb: 11598.835164835165
+            min_mb: 116.0
+            samples: 91
+            per_gpu:
+            - gpu: 0
+              max_mb: 6195.0
+              total_mb: 24576.0
+            - gpu: 1
+              max_mb: 2785.0
+              total_mb: 24576.0
+            - gpu: 2
+              max_mb: 2827.0
+              total_mb: 24576.0
+            - gpu: 3
+              max_mb: 2857.0
+              total_mb: 24576.0
+      summary:
+        avg_solving_time: 31.247799396514893
+        std_solving_time: 0.0
+        avg_total_time: 49.643808126449585
+        avg_iterations: 10.0
+        avg_time_per_iteration_ms: 3124.7799396514893
+        speedup_vs_first: 0.8553979516837619
+        max_ram_mb: 53847.12109375
+        successful_runs: 1
+        max_vram_mb: 14664.0
+        score: 0.3015244173468037
+    analysis:
+      best_solver: CG+JACOBI
+      best_score: 0.0
+      best_solving_time: 18.499196767807007
+      baseline_solver: FGMRES+GAMG
+      baseline_solving_time: 26.72930359840393
+      by_preconditioner:
+        BJACOBI:
+          best_solver: CG+BJACOBI
+          best_time: 24.345853567123413
+          avg_time: 33.25894157091776
+          avg_iterations: 10.0
+          count: 3
+        GAMG:
+          best_solver: FGMRES+GAMG
+          best_time: 26.72930359840393
+          avg_time: 29.60136604309082
+          avg_iterations: 10.0
+          count: 3
+        JACOBI:
+          best_solver: CG+JACOBI
+          best_time: 18.499196767807007
+          avg_time: 24.87349808216095
+          avg_iterations: 10.0
+          count: 2
+      gamg_comparison:
+        best_gamg: FGMRES+GAMG
+        best_gamg_time: 26.72930359840393
+        best_gamg_iters: 10.0
+        best_other: CG+JACOBI
+        best_other_time: 18.499196767807007
+        best_other_iters: 10.0
+        gamg_speedup: 0.6920942290809117

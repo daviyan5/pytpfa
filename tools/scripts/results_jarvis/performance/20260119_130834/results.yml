@@ -1,0 +1,872 @@
+metadata:
+  config: jarvis
+  test_type: performance
+  timestamp: '20260119_130834'
+  hostname: 8d4cc7ec1281
+  hardware:
+    physical_cores: 28
+    num_gpus: 4
+    vram_per_gpu_gb: 24
+    total_ram_gb: 251
+    gpu_model: Quadro RTX 6000
+    gpu_peak_bandwidth_gb_s: 672
+  solver_used:
+    ksp_type: cg
+    pc_type: jacobi
+    name: CG+JACOBI
+    source: solver_comparison
+results:
+  performance:
+    mesh:
+      nx: 230
+      ny: 230
+      nz: 230
+      total: 12167000
+    results:
+    - mpi: 1
+      total_cells: 12167000
+      cpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 3006.640202522278
+            preprocessing: 151.64128303527832
+            solving: 2770.7430379390717
+            updating: 84.24857926368713
+          memory:
+            ram:
+              max_mb: 48177.34765625
+              avg_mb: 45205.77570059808
+              min_mb: 2.5
+              samples: 5967
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 3018.48251080513
+            preprocessing: 150.52967190742493
+            solving: 2783.4768855571747
+            updating: 84.4688172340393
+          memory:
+            ram:
+              max_mb: 48311.40234375
+              avg_mb: 45220.467240574406
+              min_mb: 2.5
+              samples: 5991
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 3012.561356663704
+          std_total: 5.921154141426086
+          avg_solving: 2777.109961748123
+          avg_preprocessing: 151.08547747135162
+          avg_updating: 84.35869824886322
+          max_ram_mb: 48311.40234375
+          successful_runs: 2
+      gpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 292.5270793437958
+            preprocessing: 152.373113155365
+            solving: 59.285420656204224
+            updating: 80.86395025253296
+          memory:
+            ram:
+              max_mb: 48967.68359375
+              avg_mb: 37576.31239583333
+              min_mb: 2.5
+              samples: 525
+            vram:
+              max_mb: 3914.0
+              avg_mb: 1698.2628571428572
+              min_mb: 116.0
+              samples: 525
+              per_gpu:
+              - gpu: 0
+                max_mb: 3827.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 29.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 29.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 29.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 296.6336750984192
+            preprocessing: 154.0919315814972
+            solving: 59.34884524345398
+            updating: 83.18809580802917
+          memory:
+            ram:
+              max_mb: 48953.9609375
+              avg_mb: 37601.27490601504
+              min_mb: 2.5
+              samples: 532
+            vram:
+              max_mb: 3914.0
+              avg_mb: 1708.1315789473683
+              min_mb: 116.0
+              samples: 532
+              per_gpu:
+              - gpu: 0
+                max_mb: 3827.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 29.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 29.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 29.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 294.5803772211075
+          std_total: 2.0532978773117065
+          avg_solving: 59.3171329498291
+          avg_preprocessing: 153.2325223684311
+          avg_updating: 82.02602303028107
+          max_ram_mb: 48967.68359375
+          successful_runs: 2
+          max_vram_mb: 3914.0
+      speedup: 10.226619251025406
+      speedup_solving: 46.81800727113741
+    - mpi: 2
+      total_cells: 12167000
+      cpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 1586.3418259620667
+            preprocessing: 78.8297655582428
+            solving: 1463.2563061714172
+            updating: 44.248942613601685
+          memory:
+            ram:
+              max_mb: 50992.234375
+              avg_mb: 47611.449398675744
+              min_mb: 0.5
+              samples: 3148
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 1594.3860278129578
+            preprocessing: 80.0084159374237
+            solving: 1470.6115605831146
+            updating: 43.75926375389099
+          memory:
+            ram:
+              max_mb: 50186.35546875
+              avg_mb: 47589.63970551935
+              min_mb: 2.5
+              samples: 3165
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 1590.3639268875122
+          std_total: 4.022100925445557
+          avg_solving: 1466.933933377266
+          avg_preprocessing: 79.41909074783325
+          avg_updating: 44.00410318374634
+          max_ram_mb: 50992.234375
+          successful_runs: 2
+      gpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 151.67134165763855
+            preprocessing: 79.88092947006226
+            solving: 31.062660932540894
+            updating: 40.723875761032104
+          memory:
+            ram:
+              max_mb: 51084.18359375
+              avg_mb: 38646.39455965909
+              min_mb: 2.5
+              samples: 275
+            vram:
+              max_mb: 3622.0
+              avg_mb: 2006.050909090909
+              min_mb: 116.0
+              samples: 275
+              per_gpu:
+              - gpu: 0
+                max_mb: 1863.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1701.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 29.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 29.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 153.23639225959778
+            preprocessing: 80.56945323944092
+            solving: 30.985212802886963
+            updating: 41.67817497253418
+          memory:
+            ram:
+              max_mb: 51056.8125
+              avg_mb: 38836.68563853791
+              min_mb: 2.5
+              samples: 277
+            vram:
+              max_mb: 4272.0
+              avg_mb: 2013.2635379061371
+              min_mb: 116.0
+              samples: 277
+              per_gpu:
+              - gpu: 0
+                max_mb: 2187.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 2027.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 29.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 29.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 152.45386695861816
+          std_total: 0.7825253009796143
+          avg_solving: 31.023936867713928
+          avg_preprocessing: 80.22519135475159
+          avg_updating: 41.20102536678314
+          max_ram_mb: 51084.18359375
+          successful_runs: 2
+          max_vram_mb: 4272.0
+      speedup: 10.431771647479417
+      speedup_solving: 47.28393883833223
+    - mpi: 4
+      total_cells: 12167000
+      cpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 876.3786702156067
+            preprocessing: 43.20226335525513
+            solving: 811.6883187294006
+            updating: 21.481410026550293
+          memory:
+            ram:
+              max_mb: 52722.1796875
+              avg_mb: 49196.62779049928
+              min_mb: 2.5
+              samples: 1740
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 875.748523235321
+            preprocessing: 43.689659118652344
+            solving: 810.9867897033691
+            updating: 21.065479278564453
+          memory:
+            ram:
+              max_mb: 52585.7421875
+              avg_mb: 49167.678097146345
+              min_mb: 2.5
+              samples: 1739
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 876.0635967254639
+          std_total: 0.31507349014282227
+          avg_solving: 811.3375542163849
+          avg_preprocessing: 43.445961236953735
+          avg_updating: 21.273444652557373
+          max_ram_mb: 52722.1796875
+          successful_runs: 2
+      gpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 81.34702610969543
+            preprocessing: 44.716389894485474
+            solving: 16.86479115486145
+            updating: 19.76180362701416
+          memory:
+            ram:
+              max_mb: 52770.046875
+              avg_mb: 38880.899937913906
+              min_mb: 2.5
+              samples: 151
+            vram:
+              max_mb: 5012.0
+              avg_mb: 2586.887417218543
+              min_mb: 116.0
+              samples: 151
+              per_gpu:
+              - gpu: 0
+                max_mb: 1627.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1145.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1119.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 1121.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 79.75488209724426
+            preprocessing: 43.56412363052368
+            solving: 16.83051085472107
+            updating: 19.356983184814453
+          memory:
+            ram:
+              max_mb: 51885.3125
+              avg_mb: 38870.91757284629
+              min_mb: 2.5
+              samples: 148
+            vram:
+              max_mb: 4796.0
+              avg_mb: 2570.8783783783783
+              min_mb: 116.0
+              samples: 148
+              per_gpu:
+              - gpu: 0
+                max_mb: 1601.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1119.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1119.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 957.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 80.55095410346985
+          std_total: 0.7960720062255859
+          avg_solving: 16.84765100479126
+          avg_preprocessing: 44.14025676250458
+          avg_updating: 19.559393405914307
+          max_ram_mb: 52770.046875
+          successful_runs: 2
+          max_vram_mb: 5012.0
+      speedup: 10.875893482281251
+      speedup_solving: 48.15731011911694
+    - mpi: 8
+      total_cells: 12167000
+      cpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 578.1143684387207
+            preprocessing: 27.97469139099121
+            solving: 537.7889080047607
+            updating: 12.342295408248901
+          memory:
+            ram:
+              max_mb: 54574.3359375
+              avg_mb: 51850.18141454526
+              min_mb: 2.5
+              samples: 1149
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 480.0877540111542
+            preprocessing: 25.70686936378479
+            solving: 443.2942886352539
+            updating: 11.079398393630981
+          memory:
+            ram:
+              max_mb: 54578.8359375
+              avg_mb: 51686.211251795976
+              min_mb: 2.5
+              samples: 957
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 529.1010612249374
+          std_total: 49.013307213783264
+          avg_solving: 490.5415983200073
+          avg_preprocessing: 26.840780377388
+          avg_updating: 11.710846900939941
+          max_ram_mb: 54578.8359375
+          successful_runs: 2
+      gpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 52.194533824920654
+            preprocessing: 24.74014401435852
+            solving: 17.29461169242859
+            updating: 10.155874490737915
+          memory:
+            ram:
+              max_mb: 55341.5859375
+              avg_mb: 40972.3599609375
+              min_mb: 2.5
+              samples: 100
+            vram:
+              max_mb: 6086.0
+              avg_mb: 3829.68
+              min_mb: 116.0
+              samples: 100
+              per_gpu:
+              - gpu: 0
+                max_mb: 2215.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1309.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1227.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 1335.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 51.76772904396057
+            preprocessing: 24.389285802841187
+            solving: 17.352556228637695
+            updating: 10.022349834442139
+          memory:
+            ram:
+              max_mb: 55365.53515625
+              avg_mb: 41364.22301498725
+              min_mb: 2.5
+              samples: 98
+            vram:
+              max_mb: 5620.0
+              avg_mb: 3888.673469387755
+              min_mb: 116.0
+              samples: 98
+              per_gpu:
+              - gpu: 0
+                max_mb: 2133.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1171.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1145.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 1171.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 51.98113143444061
+          std_total: 0.2134023904800415
+          avg_solving: 17.323583960533142
+          avg_preprocessing: 24.564714908599854
+          avg_updating: 10.089112162590027
+          max_ram_mb: 55365.53515625
+          successful_runs: 2
+          max_vram_mb: 6086.0
+      speedup: 10.17871382603989
+      speedup_solving: 28.316403778661897
+    - mpi: 16
+      total_cells: 12167000
+      cpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 341.3156249523163
+            preprocessing: 14.918055295944214
+            solving: 320.12467432022095
+            updating: 6.265957832336426
+          memory:
+            ram:
+              max_mb: 60565.15234375
+              avg_mb: 57420.309114965174
+              min_mb: 2.5
+              samples: 682
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 347.90299797058105
+            preprocessing: 14.855894565582275
+            solving: 326.8281571865082
+            updating: 6.211929559707642
+          memory:
+            ram:
+              max_mb: 60035.98046875
+              avg_mb: 57417.95973255918
+              min_mb: 2.5
+              samples: 697
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 344.60931146144867
+          std_total: 3.2936865091323853
+          avg_solving: 323.47641575336456
+          avg_preprocessing: 14.886974930763245
+          avg_updating: 6.238943696022034
+          max_ram_mb: 60565.15234375
+          successful_runs: 2
+      gpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 39.97447848320007
+            preprocessing: 15.043684482574463
+            solving: 18.72756004333496
+            updating: 6.199546575546265
+          memory:
+            ram:
+              max_mb: 61675.703125
+              avg_mb: 47852.51592938312
+              min_mb: 2.5
+              samples: 77
+            vram:
+              max_mb: 8148.0
+              avg_mb: 6251.428571428572
+              min_mb: 116.0
+              samples: 77
+              per_gpu:
+              - gpu: 0
+                max_mb: 3475.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1603.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1509.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 1561.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 40.56422710418701
+            preprocessing: 15.437363147735596
+            solving: 18.911617279052734
+            updating: 6.209330081939697
+          memory:
+            ram:
+              max_mb: 62311.06640625
+              avg_mb: 47656.2473457532
+              min_mb: 2.5
+              samples: 78
+            vram:
+              max_mb: 8668.0
+              avg_mb: 6216.307692307692
+              min_mb: 116.0
+              samples: 78
+              per_gpu:
+              - gpu: 0
+                max_mb: 3559.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1729.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1703.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 1677.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 40.26935279369354
+          std_total: 0.29487431049346924
+          avg_solving: 18.819588661193848
+          avg_preprocessing: 15.24052381515503
+          avg_updating: 6.204438328742981
+          max_ram_mb: 62311.06640625
+          successful_runs: 2
+          max_vram_mb: 8668.0
+      speedup: 8.557607400022999
+      speedup_solving: 17.188282994748747
+    - mpi: 24
+      total_cells: 12167000
+      cpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 374.05831265449524
+            preprocessing: 13.38689637184143
+            solving: 354.88107919692993
+            updating: 5.783111095428467
+          memory:
+            ram:
+              max_mb: 67647.2265625
+              avg_mb: 64207.19943720872
+              min_mb: 3.0
+              samples: 751
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 386.3545832633972
+            preprocessing: 14.07552170753479
+            solving: 366.52489280700684
+            updating: 5.72423529624939
+          memory:
+            ram:
+              max_mb: 67655.37890625
+              avg_mb: 64253.23193548387
+              min_mb: 2.5
+              samples: 775
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 380.2064479589462
+          std_total: 6.148135304450989
+          avg_solving: 360.7029860019684
+          avg_preprocessing: 13.73120903968811
+          avg_updating: 5.753673195838928
+          max_ram_mb: 67655.37890625
+          successful_runs: 2
+      gpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 42.055049657821655
+            preprocessing: 15.250519275665283
+            solving: 20.84499764442444
+            updating: 5.952451229095459
+          memory:
+            ram:
+              max_mb: 70006.515625
+              avg_mb: 53704.3561698718
+              min_mb: 2.5
+              samples: 78
+            vram:
+              max_mb: 10564.0
+              avg_mb: 8432.23076923077
+              min_mb: 116.0
+              samples: 78
+              per_gpu:
+              - gpu: 0
+                max_mb: 4799.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1885.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1915.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 1965.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 48.112980365753174
+            preprocessing: 16.474000692367554
+            solving: 25.589665174484253
+            updating: 6.041698455810547
+          memory:
+            ram:
+              max_mb: 69990.484375
+              avg_mb: 55557.471875
+              min_mb: 2.5
+              samples: 90
+            vram:
+              max_mb: 10434.0
+              avg_mb: 8560.222222222223
+              min_mb: 116.0
+              samples: 90
+              per_gpu:
+              - gpu: 0
+                max_mb: 4773.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 1885.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 1889.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 1887.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 45.084015011787415
+          std_total: 3.0289653539657593
+          avg_solving: 23.217331409454346
+          avg_preprocessing: 15.862259984016418
+          avg_updating: 5.997074842453003
+          max_ram_mb: 70006.515625
+          successful_runs: 2
+          max_vram_mb: 10564.0
+      speedup: 8.433287227402873
+      speedup_solving: 15.53593647955106
+    - mpi: 28
+      total_cells: 12167000
+      cpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 496.0449297428131
+            preprocessing: 17.44192934036255
+            solving: 471.7911560535431
+            updating: 6.800787448883057
+          memory:
+            ram:
+              max_mb: 70621.40625
+              avg_mb: 67400.58378043423
+              min_mb: 3.0
+              samples: 996
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 486.40157890319824
+            preprocessing: 17.227565050125122
+            solving: 462.3808398246765
+            updating: 6.7821619510650635
+          memory:
+            ram:
+              max_mb: 70627.94921875
+              avg_mb: 67265.21977900203
+              min_mb: 2.5
+              samples: 987
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 491.2232543230057
+          std_total: 4.821675419807434
+          avg_solving: 467.0859979391098
+          avg_preprocessing: 17.334747195243835
+          avg_updating: 6.79147469997406
+          max_ram_mb: 70627.94921875
+          successful_runs: 2
+      gpu:
+        runs:
+        - run_id: 0
+          times:
+            total: 48.91039180755615
+            preprocessing: 17.859532833099365
+            solving: 24.06946325302124
+            updating: 6.972293853759766
+          memory:
+            ram:
+              max_mb: 73307.23828125
+              avg_mb: 57493.01272823034
+              min_mb: 1.0
+              samples: 89
+            vram:
+              max_mb: 12286.0
+              avg_mb: 9607.078651685393
+              min_mb: 116.0
+              samples: 89
+              per_gpu:
+              - gpu: 0
+                max_mb: 5585.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 2241.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 2219.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 2241.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        - run_id: 1
+          times:
+            total: 53.51997113227844
+            preprocessing: 19.150676488876343
+            solving: 27.399839162826538
+            updating: 6.960890054702759
+          memory:
+            ram:
+              max_mb: 73272.359375
+              avg_mb: 58056.07647390464
+              min_mb: 1.0
+              samples: 97
+            vram:
+              max_mb: 11730.0
+              avg_mb: 9668.927835051547
+              min_mb: 116.0
+              samples: 97
+              per_gpu:
+              - gpu: 0
+                max_mb: 5517.0
+                total_mb: 24576.0
+              - gpu: 1
+                max_mb: 2071.0
+                total_mb: 24576.0
+              - gpu: 2
+                max_mb: 2071.0
+                total_mb: 24576.0
+              - gpu: 3
+                max_mb: 2071.0
+                total_mb: 24576.0
+          solver_info:
+            n_iterations: 10
+            n_elements: 12167000
+        summary:
+          avg_total: 51.2151814699173
+          std_total: 2.304789662361145
+          avg_solving: 25.73465120792389
+          avg_preprocessing: 18.505104660987854
+          avg_updating: 6.966591954231262
+          max_ram_mb: 73307.23828125
+          successful_runs: 2
+          max_vram_mb: 12286.0
+      speedup: 9.591360222193876
+      speedup_solving: 18.150080767183297

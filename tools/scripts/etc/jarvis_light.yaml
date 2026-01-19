@@ -17,10 +17,10 @@ hardware:
 
 
 mpi:
-  processes: [1, 2, 4, 8, 16]
+  processes: [1, 2, 4, 8, 16, 24, 32]
   omp_num_threads: 1
-  bind_to: "none"
-  map_by: "none"
+  bind_to: "numa"
+  map_by: "numa"
 
 gpu:
   use_mps: true
@@ -67,7 +67,7 @@ correctness:
 performance:
   reservoir_base: "examples/example_3/reservoir.ini"
   mesh: [30, 30, 30]
-  mpi_processes: [1, 2, 4, 8, 16]
+  mpi_processes: [1, 2, 4, 8, 16, 24, 32]
   runs: 2
   optimized: true
   timeout_hours: 1.0
