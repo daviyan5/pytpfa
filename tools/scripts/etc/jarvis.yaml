@@ -116,7 +116,7 @@ solver_comparison:
   reservoir_base: "examples/example_3/reservoir.ini"
   mesh: [200, 200, 200]
   mpi_processes: 4
-  runs: 2
+  runs: 1
   use_gpu: true
   optimized: true
   timeout_hours: 4.0
@@ -133,7 +133,6 @@ solver_comparison:
       ksp_type: "bcgs"
       pc_type: "gamg"
       description: "BiCGStab + Multigrid Algébrico"
-    
     - name: "CG+BJACOBI"
       ksp_type: "cg"
       pc_type: "bjacobi"
@@ -146,16 +145,6 @@ solver_comparison:
       ksp_type: "bcgs"
       pc_type: "bjacobi"
       description: "BiCGStab + Block Jacobi"
-    
-    - name: "GMRES+ASM"
-      ksp_type: "gmres"
-      pc_type: "asm"
-      description: "GMRES + Additive Schwarz"
-    - name: "FGMRES+ASM"
-      ksp_type: "fgmres"
-      pc_type: "asm"
-      description: "Flexible GMRES + Additive Schwarz"
-    
     - name: "CG+JACOBI"
       ksp_type: "cg"
       pc_type: "jacobi"
@@ -164,17 +153,3 @@ solver_comparison:
       ksp_type: "gmres"
       pc_type: "jacobi"
       description: "GMRES + Jacobi"
-    
-    - name: "CG+SOR"
-      ksp_type: "cg"
-      pc_type: "sor"
-      description: "Gradiente Conjugado + SOR"
-    
-    - name: "CG+NONE"
-      ksp_type: "cg"
-      pc_type: "none"
-      description: "Gradiente Conjugado sem precondicionador"
-    - name: "GMRES+NONE"
-      ksp_type: "gmres"
-      pc_type: "none"
-      description: "GMRES sem precondicionador"

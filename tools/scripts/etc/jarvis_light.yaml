@@ -15,6 +15,7 @@ hardware:
   gpu_model: "Quadro RTX 6000"
   gpu_bandwidth_gb_s: 672
 
+
 mpi:
   processes: [1, 2, 4, 8, 16]
   omp_num_threads: 1
@@ -65,36 +66,36 @@ correctness:
 
 performance:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [150, 150, 150]  # ~3.4M células
+  mesh: [30, 30, 30]
   mpi_processes: [1, 2, 4, 8, 16]
-  runs: 1
+  runs: 2
   optimized: true
   timeout_hours: 1.0
 
 strong_scaling:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [150, 150, 150]  # ~3.4M células
+  mesh: [30, 30, 30]
   mpi_processes: [1, 2, 3, 4]
-  runs: 1
+  runs: 2
   optimized: true
   timeout_hours: 1.0
 
 weak_scaling:
   reservoir_base: "examples/example_3/reservoir.ini"
-  base_mesh: [100, 100, 100]  # ~1M por processo
+  base_mesh: [10, 10, 10]
   mpi_processes: [1, 2, 3, 4]
-  runs: 1
+  runs: 2
   decomposition:
-    1: [100, 100, 100]  # ~1M
-    2: [126, 126, 126]  # ~2M
-    3: [145, 145, 145]  # ~3M
-    4: [159, 159, 159]  # ~4M
+    1: [10, 10, 10]
+    2: [12, 12, 12]
+    3: [14, 14, 14]
+    4: [15, 15, 15]
   optimized: true
   timeout_hours: 1.0
 
 bandwidth:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [200, 200, 200]  # ~8M células
+  mesh: [50, 50, 50]
   mpi_processes: 4
   num_gpus: 4
   runs: 1
@@ -107,14 +108,13 @@ bandwidth:
 
 solver_comparison:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [150, 150, 150]  # ~3.4M células
+  mesh: [80, 80, 80]
   mpi_processes: 4
   runs: 1
   use_gpu: true
   optimized: true
   timeout_hours: 1.0
   solvers:
-    # GAMG-based
     - name: "FGMRES+GAMG"
       ksp_type: "fgmres"
       pc_type: "gamg"
@@ -124,7 +124,6 @@ solver_comparison:
       pc_type: "gamg"
       description: "Gradiente Conjugado + Multigrid Algébrico"
     
-    # Block Jacobi
     - name: "CG+BJACOBI"
       ksp_type: "cg"
       pc_type: "bjacobi"
@@ -134,19 +133,16 @@ solver_comparison:
       pc_type: "bjacobi"
       description: "GMRES + Block Jacobi"
     
-    # ASM
     - name: "GMRES+ASM"
       ksp_type: "gmres"
       pc_type: "asm"
       description: "GMRES + Additive Schwarz"
     
-    # Jacobi simples
     - name: "CG+JACOBI"
       ksp_type: "cg"
       pc_type: "jacobi"
       description: "Gradiente Conjugado + Jacobi"
     
-    # Sem precondicionador
     - name: "CG+NONE"
       ksp_type: "cg"
       pc_type: "none"

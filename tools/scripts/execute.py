@@ -733,7 +733,7 @@ def test_correctness_case(config: Config, case: TestCase, temp_dir: Path) -> Dic
         config_info = create_reservoir_ini(reservoir_path, str(ini_path), nx, ny, nz)
         actual_ini_path = config_info["output_path"]
         
-        print(f"    Running...", end=" ", flush=True, flush=True)
+        print(f"    Running...", end=" ", flush=True)
         
         start_time = time.time()
         results, memory = run_solver(
@@ -810,7 +810,7 @@ def test_performance(config: Config, temp_dir: Path) -> Dict:
         
         print(f"\n  {Colors.BOLD}[CPU]{Colors.END}", flush=True)
         for r in range(config.performance_runs):
-            print(f"    Run {r+1}/{config.performance_runs}...", end=" ", flush=True, flush=True)
+            print(f"    Run {r+1}/{config.performance_runs}...", end=" ", flush=True)
             results, memory = run_solver(config, actual_ini_path, mpi, f"Perf_CPU_{mpi}p_r{r}",
                                          use_gpu=False, opt=config.performance_optimized,
                                          timeout_hours=config.performance_timeout)
@@ -845,7 +845,7 @@ def test_performance(config: Config, temp_dir: Path) -> Dict:
 
         print(f"\n  {Colors.BOLD}[GPU]{Colors.END}", flush=True)
         for r in range(config.performance_runs):
-            print(f"    Run {r+1}/{config.performance_runs}...", end=" ", flush=True, flush=True)
+            print(f"    Run {r+1}/{config.performance_runs}...", end=" ", flush=True)
             results, memory = run_solver(config, actual_ini_path, mpi, f"Perf_GPU_{mpi}p_r{r}",
                                          use_gpu=True, opt=config.performance_optimized,
                                          timeout_hours=config.performance_timeout)
@@ -924,7 +924,7 @@ def test_strong_scaling(config: Config, temp_dir: Path) -> Dict:
         mpi_result = {"mpi": int(mpi), "gpus": int(mpi), "total_cells": int(total_size), "runs": []}
 
         for r in range(config.strong_runs):
-            print(f"  Run {r+1}/{config.strong_runs}...", end=" ", flush=True, flush=True)
+            print(f"  Run {r+1}/{config.strong_runs}...", end=" ", flush=True)
             results, memory = run_solver(config, actual_ini_path, mpi, f"Strong_{mpi}p_r{r}",
                                          use_gpu=True, opt=config.strong_optimized,
                                          timeout_hours=config.strong_timeout)
@@ -1006,7 +1006,7 @@ def test_weak_scaling(config: Config, temp_dir: Path) -> Dict:
         }
 
         for r in range(config.weak_runs):
-            print(f"  Run {r+1}/{config.weak_runs}...", end=" ", flush=True, flush=True)
+            print(f"  Run {r+1}/{config.weak_runs}...", end=" ", flush=True)
             results, memory = run_solver(config, actual_ini_path, mpi, f"Weak_{mpi}p_r{r}",
                                          use_gpu=True, opt=config.weak_optimized,
                                          timeout_hours=config.weak_timeout)
@@ -1100,7 +1100,7 @@ def test_bandwidth(config: Config, temp_dir: Path) -> Dict:
     }
 
     for r in range(config.bandwidth_runs):
-        print(f"\n  Run {r+1}/{config.bandwidth_runs}...", end=" ", flush=True, flush=True)
+        print(f"\n  Run {r+1}/{config.bandwidth_runs}...", end=" ", flush=True)
         
         results, memory = run_solver(
             config, actual_ini_path, mpi,
@@ -1367,7 +1367,7 @@ def test_solver_comparison(config: Config, temp_dir: Path) -> Dict:
         }
 
         for r in range(config.solver_comparison_runs):
-            print(f"  Run {r+1}/{config.solver_comparison_runs}...", end=" ", flush=True, flush=True)
+            print(f"  Run {r+1}/{config.solver_comparison_runs}...", end=" ", flush=True)
             
             results, memory = run_solver_custom(
                 config, actual_ini_path, mpi,
@@ -1451,34 +1451,60 @@ def test_solver_comparison(config: Config, temp_dir: Path) -> Dict:
         print_header("SOLVER COMPARISON SUMMARY")
         
         
-        best_solver = min(valid_solvers, key=lambda s: s["summary"]["avg_solving_time"])
+        
+        times = [s["summary"]["avg_solving_time"] for s in valid_solvers]
+        vrams = [s["summary"].get("max_vram_mb", 0.0) for s in valid_solvers]
+        
+        
+        min_time, max_time = min(times), max(times)
+        min_vram, max_vram = min(vrams), max(vrams)
+        
+        range_time = max_time - min_time
+        range_vram = max_vram - min_vram
+        
+        
+        for s in valid_solvers:
+            t = s["summary"]["avg_solving_time"]
+            v = s["summary"].get("max_vram_mb", 0.0)
+            
+            
+            norm_time = (t - min_time) / range_time if range_time > 1e-9 else 0.0
+            norm_vram = (v - min_vram) / range_vram if range_vram > 1e-9 else 0.0
+            
+            
+            s["summary"]["score"] = (0.3 * norm_time) + (0.7 * norm_vram)
+            
+        
+        best_solver = min(valid_solvers, key=lambda s: s["summary"]["score"])
         baseline_solver = valid_solvers[0]
         
-        print(f"\n{'Solver':<18} {'Solve (s)':<10} {'Iters':<8} {'ms/iter':<10} {'Speedup':<10} {'VRAM (MB)':<10}", flush=True)
-        print("-" * 76, flush=True)
+        
+        print(f"\n{'Solver':<18} {'Solve (s)':<10} {'Iters':<8} {'ms/iter':<10} {'Speedup':<10} {'VRAM (MB)':<10} {'Score':<6}", flush=True)
+        print("-" * 84, flush=True)
         
         for s in valid_solvers:
             summ = s["summary"]
             speedup = baseline_solver["summary"]["avg_solving_time"] / summ["avg_solving_time"] if summ["avg_solving_time"] > 0 else 0
             vram_str = f"{summ.get('max_vram_mb', 0):.0f}" if summ.get('max_vram_mb') else "N/A"
+            score_val = summ["score"]
             
             is_best = s["name"] == best_solver["name"]
             color = Colors.GREEN if is_best else ""
             end_color = Colors.END if is_best else ""
             
-            print(f"{color}{s['name']:<18} {summ['avg_solving_time']:<10.2f} {summ['avg_iterations']:<8.0f} {summ['avg_time_per_iteration_ms']:<10.2f} {speedup:<10.2f}x {vram_str:<10}{end_color}", flush=True)
+            print(f"{color}{s['name']:<18} {summ['avg_solving_time']:<10.2f} {summ['avg_iterations']:<8.0f} {summ['avg_time_per_iteration_ms']:<10.2f} {speedup:<10.2f}x {vram_str:<10} {score_val:<6.3f}{end_color}", flush=True)
         
-        print(f"\n{Colors.GREEN}Best solver: {best_solver['name']} ({best_solver['summary']['avg_solving_time']:.2f}s){Colors.END}", flush=True)
+        print(f"\n{Colors.GREEN}Best solver: {best_solver['name']} (Score: {best_solver['summary']['score']:.3f}){Colors.END}", flush=True)
         
         
         results_data["analysis"] = {
             "best_solver": best_solver["name"],
+            "best_score": best_solver["summary"]["score"],
             "best_solving_time": best_solver["summary"]["avg_solving_time"],
             "baseline_solver": baseline_solver["name"],
             "baseline_solving_time": baseline_solver["summary"]["avg_solving_time"],
             "by_preconditioner": {},
         }
-        
         
         pc_groups = {}
         for s in valid_solvers:
@@ -1505,10 +1531,8 @@ def test_solver_comparison(config: Config, temp_dir: Path) -> Dict:
             
             print(f"  {pc:<12}: best={best_in_group['name']:<16} time={best_in_group['summary']['avg_solving_time']:.2f}s, avg_iters={avg_iters:.0f}", flush=True)
         
-        
         print(f"\n{Colors.BOLD}Key Comparisons:{Colors.END}", flush=True)
         print("-" * 50, flush=True)
-        
         
         gamg_solvers = [s for s in valid_solvers if s["pc_type"].lower() == "gamg"]
         non_gamg_solvers = [s for s in valid_solvers if s["pc_type"].lower() != "gamg" and s["pc_type"].lower() != "none"]
@@ -1534,15 +1558,14 @@ def test_solver_comparison(config: Config, temp_dir: Path) -> Dict:
             else:
                 print(f"  {Colors.YELLOW}{best_non_gamg['name']} is {1/ratio:.2f}x faster than GAMG ({best_gamg['name']}){Colors.END}", flush=True)
             
-            
             gamg_iters = best_gamg["summary"]["avg_iterations"]
             other_iters = best_non_gamg["summary"]["avg_iterations"]
             print(f"  GAMG iterations: {gamg_iters:.0f} vs {best_non_gamg['name']}: {other_iters:.0f}", flush=True)
         
-        
         none_solvers = [s for s in valid_solvers if s["pc_type"].lower() == "none"]
         if none_solvers:
             best_none = min(none_solvers, key=lambda s: s["summary"]["avg_solving_time"])
+            
             speedup_from_none = best_none["summary"]["avg_solving_time"] / best_solver["summary"]["avg_solving_time"]
             
             results_data["analysis"]["preconditioning_benefit"] = {
