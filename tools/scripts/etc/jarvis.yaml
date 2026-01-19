@@ -13,7 +13,8 @@ hardware:
   total_vram_gb: 96
   total_ram_gb: 251
   gpu_model: "Quadro RTX 6000"
-  gpu_bandwidth_gb_s: 672  # Pico teórico da RTX 6000
+  gpu_bandwidth_gb_s: 672
+
 
 mpi:
   processes: [1, 2, 4, 8, 16]
@@ -71,7 +72,7 @@ correctness:
 
 performance:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [340, 340, 340]  # ~39M células - cabe em 1 GPU (~23GB VRAM)
+  mesh: [317, 317, 317]
   mpi_processes: [1, 2, 4, 8, 16]
   runs: 2
   optimized: true
@@ -79,7 +80,7 @@ performance:
 
 strong_scaling:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [340, 340, 340]  # ~39M células - problema fixo grande
+  mesh: [317, 317, 317]
   mpi_processes: [1, 2, 3, 4]
   runs: 2
   optimized: true
@@ -87,40 +88,39 @@ strong_scaling:
 
 weak_scaling:
   reservoir_base: "examples/example_3/reservoir.ini"
-  base_mesh: [340, 340, 340]  # ~39M células por processo (~23GB/GPU)
+  base_mesh: [220, 220, 220]
   mpi_processes: [1, 2, 3, 4]
   runs: 2
   decomposition:
-    1: [340, 340, 340]   # ~39M células (1 GPU, ~23GB)
-    2: [428, 428, 428]   # ~78M células (2 GPUs, ~47GB)
-    3: [493, 493, 493]   # ~120M células (3 GPUs, ~72GB)
-    4: [543, 543, 543]   # ~160M células (4 GPUs, ~96GB)
+    1: [220, 220, 220]
+    2: [277, 277, 277]
+    3: [317, 317, 317]
+    4: [349, 349, 349]
   optimized: true
   timeout_hours: 10.0
 
 bandwidth:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [543, 543, 543]  # ~160M células - maximiza 4 GPUs (~96GB VRAM)
+  mesh: [350, 350, 350]
   mpi_processes: 16
   num_gpus: 4
   runs: 1
   optimized: true
   timeout_hours: 12.0
   analysis:
-    bytes_per_cell: 64  # Estimativa: 8 doubles por célula (pressão, fluxos, etc)
-    stencil_size: 7     # TPFA 3D: célula central + 6 vizinhos
-    flops_per_cell: 14  # Operações por célula no SpMV
+    bytes_per_cell: 64
+    stencil_size: 7
+    flops_per_cell: 14
 
 solver_comparison:
   reservoir_base: "examples/example_3/reservoir.ini"
-  mesh: [250, 250, 250]  # ~15.6M células - representativo sem demorar demais
+  mesh: [200, 200, 200]
   mpi_processes: 4
   runs: 2
   use_gpu: true
   optimized: true
   timeout_hours: 4.0
   solvers:
-    # GAMG-based (Multigrid Algébrico) - geralmente melhor para sistemas elípticos
     - name: "FGMRES+GAMG"
       ksp_type: "fgmres"
       pc_type: "gamg"
@@ -134,7 +134,6 @@ solver_comparison:
       pc_type: "gamg"
       description: "BiCGStab + Multigrid Algébrico"
     
-    # Block Jacobi - funciona bem com MPI/GPU
     - name: "CG+BJACOBI"
       ksp_type: "cg"
       pc_type: "bjacobi"
@@ -148,7 +147,6 @@ solver_comparison:
       pc_type: "bjacobi"
       description: "BiCGStab + Block Jacobi"
     
-    # ASM (Additive Schwarz) - bom para paralelismo
     - name: "GMRES+ASM"
       ksp_type: "gmres"
       pc_type: "asm"
@@ -158,7 +156,6 @@ solver_comparison:
       pc_type: "asm"
       description: "Flexible GMRES + Additive Schwarz"
     
-    # Jacobi puro - baseline simples
     - name: "CG+JACOBI"
       ksp_type: "cg"
       pc_type: "jacobi"
@@ -168,13 +165,11 @@ solver_comparison:
       pc_type: "jacobi"
       description: "GMRES + Jacobi"
     
-    # SOR (Successive Over-Relaxation)
     - name: "CG+SOR"
       ksp_type: "cg"
       pc_type: "sor"
       description: "Gradiente Conjugado + SOR"
     
-    # Sem precondicionador - baseline absoluto
     - name: "CG+NONE"
       ksp_type: "cg"
       pc_type: "none"
