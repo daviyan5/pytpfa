@@ -44,6 +44,8 @@ class TPFASolver:
             "solving_time": 0.0,
             "updating_time": 0.0,
         }
+        self.out_info["ksp_iterations_per_solve"] = []
+        self.out_info["bandwidth_metrics"] = {}
 
         # For boundary conditions
         self.matching_indices = {}
@@ -272,8 +274,7 @@ class TPFASolver:
                 DX = reservoir_h[0]
                 DY = reservoir_h[1]
 
-                drainage_radius = np.sqrt(Kyx_ratio**0.5 * DX**2 + Kxy_ratio**0.5 * DY**2)
-                drainage_radius *= 0.28 / (Kyx_ratio**0.25 + Kxy_ratio**0.25)
+                drainage_radius = well.drainage_radius
 
                 well_productivity_index = (2.0 * np.pi * well.permeability * well.h) / (
                     (self.VISCOSITY * self.B_REF_FORMATION_FACTOR)
@@ -927,6 +928,10 @@ class TPFASolver:
         """
         logger.info("Solving the system...", extra={"context": f"Solver SOLVE [{self.iteration}]"})
         self.ksp.solve(self.b, self.x)
+        
+        ksp_iters = self.ksp.getIterationNumber()
+        self.out_info["ksp_iterations_per_solve"].append(ksp_iters)
+        
         self.dmstag_manager.update_from_global("pressure", SL.ELEMENT)
 
     def check(self, time):
@@ -1092,6 +1097,8 @@ class TPFASolver:
                     return obj.tolist()
                 return json.JSONEncoder.default(self, obj)
 
+        self._calculate_bandwidth_metrics()
+        
         if self.rank == 0:
             dirname = self.dirname + "/output"
             filename = self.name + f"{self.out_info['n_ranks']}_{self.out_info['n_elements']}.json"
@@ -1104,6 +1111,87 @@ class TPFASolver:
                 extra={"context": "Solver INFO"},
             )
 
+    def _calculate_bandwidth_metrics(self):
+        """
+        Calcula métricas de bandwidth baseado na estrutura real da matriz.
+        """
+        if self.A is None:
+            return
+            
+        # Estrutura da matriz
+        mat_info = self.A.getInfo()
+        n_rows = self.A.getSize()[0]
+        nnz = int(mat_info.get('nz_allocated', 0) or mat_info.get('nz_used', 0))
+        
+        if nnz == 0:
+            return
+            
+        # Iterações do KSP
+        total_ksp_iters = sum(self.out_info.get("ksp_iterations_per_solve", [0]))
+        n_solves = len(self.out_info.get("ksp_iterations_per_solve", [1]))
+        avg_iters_per_solve = total_ksp_iters / n_solves if n_solves > 0 else 0
+        
+        # Tipo do solver
+        ksp_type = self.ksp.getType() if self.ksp else "unknown"
+        pc_type = self.ksp.getPC().getType() if self.ksp else "unknown"
+        
+        # Bytes por SpMV (formato CSR)
+        # values: nnz * 8, col_idx: nnz * 4, row_ptr: (n+1) * 4
+        # x read: n * 8 (com cache ~50%), y write: n * 8
+        bytes_spmv = nnz * 8 + nnz * 4 + (n_rows + 1) * 4 + n_rows * 8 * 1.5 + n_rows * 8
+        
+        # FLOPs por SpMV: 2 * nnz (mul + add)
+        flops_spmv = 2 * nnz
+        
+        # Operações adicionais por iteração (depende do solver)
+        vector_bytes = n_rows * 8
+        if ksp_type.lower() in ['cg']:
+            # CG: 1 SpMV + 2 dots + 3 AXPYs
+            bytes_per_iter = bytes_spmv + 2 * (2 * vector_bytes) + 3 * (3 * vector_bytes)
+            flops_per_iter = flops_spmv + 2 * (2 * n_rows) + 3 * (2 * n_rows)
+        elif ksp_type.lower() in ['gmres', 'fgmres']:
+            # GMRES: estimativa com restart=30
+            k_avg = min(avg_iters_per_solve, 30) / 2
+            bytes_per_iter = bytes_spmv + (k_avg + 2) * (2 * vector_bytes) + (k_avg + 1) * (3 * vector_bytes)
+            flops_per_iter = flops_spmv + (k_avg + 2) * (2 * n_rows) + (k_avg + 1) * (2 * n_rows)
+        elif ksp_type.lower() in ['bcgs', 'bicgstab']:
+            # BiCGStab: 2 SpMVs + 4 dots + 6 AXPYs
+            bytes_per_iter = 2 * bytes_spmv + 4 * (2 * vector_bytes) + 6 * (3 * vector_bytes)
+            flops_per_iter = 2 * flops_spmv + 4 * (2 * n_rows) + 6 * (2 * n_rows)
+        else:
+            bytes_per_iter = bytes_spmv
+            flops_per_iter = flops_spmv
+        
+        # Métricas totais
+        total_bytes = bytes_per_iter * total_ksp_iters
+        total_flops = flops_per_iter * total_ksp_iters
+        
+        # Intensidade aritmética
+        ai = flops_per_iter / bytes_per_iter if bytes_per_iter > 0 else 0
+        
+        # Bandwidth efetiva (se tiver tempo de solve)
+        solve_time = self.out_info.get("solving_time", 0)
+        effective_bw = (total_bytes / 1e9) / solve_time if solve_time > 0 else 0
+        effective_gflops = (total_flops / 1e9) / solve_time if solve_time > 0 else 0
+        
+        self.out_info["bandwidth_metrics"] = {
+            "matrix_rows": n_rows,
+            "matrix_nnz": nnz,
+            "avg_nnz_per_row": nnz / n_rows if n_rows > 0 else 0,
+            "ksp_type": ksp_type,
+            "pc_type": pc_type,
+            "total_ksp_iterations": total_ksp_iters,
+            "avg_iterations_per_solve": avg_iters_per_solve,
+            "bytes_per_iteration": bytes_per_iter,
+            "flops_per_iteration": flops_per_iter,
+            "bytes_per_cell": bytes_per_iter / n_rows if n_rows > 0 else 0,
+            "flops_per_cell": flops_per_iter / n_rows if n_rows > 0 else 0,
+            "total_bytes_transferred": total_bytes,
+            "total_flops": total_flops,
+            "arithmetic_intensity": ai,
+            "effective_bandwidth_gb_s": effective_bw,
+            "effective_gflops": effective_gflops,
+        }
     def __repr__(self):
         """Return a string representation of the TPFASolver."""
         return "TODO"

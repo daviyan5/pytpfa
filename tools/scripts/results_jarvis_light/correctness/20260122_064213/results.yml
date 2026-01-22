@@ -1,0 +1,226 @@
+metadata:
+  config: jarvis_light
+  test_type: correctness
+  timestamp: '20260122_064213'
+  hostname: f8e137aa3743
+  hardware:
+    physical_cores: 32
+    num_gpus: 4
+    vram_per_gpu_gb: 24
+    total_ram_gb: 251
+    gpu_model: Quadro RTX 6000
+    gpu_peak_bandwidth_gb_s: 672
+  solver_used:
+    ksp_type: fgmres
+    pc_type: gamg
+    name: fgmres+gamg
+    source: default
+results:
+  correctness:
+  - name: example_1
+    description: Linear (solução exata)
+    results:
+    - mesh_id: M1
+      nx: 20
+      ny: 20
+      nz: 10
+      total_cells: 4000
+      h: 10.0
+      l2_error: 6.49667114811672e-07
+      times:
+        total: 1.1475510597229004
+        preprocessing: 0.9353621006011963
+        solving: 0.1633319854736328
+        updating: 0.04445791244506836
+        wall_clock: 9.077033996582031
+      memory:
+        ram:
+          max_mb: 920.56640625
+          avg_mb: 506.3828125
+          min_mb: 2.5
+          samples: 18
+      solver_info:
+        n_iterations: 10
+        n_ranks: 2
+    - mesh_id: M2
+      nx: 40
+      ny: 40
+      nz: 20
+      total_cells: 32000
+      h: 5.0
+      l2_error: 3.196068591602999e-07
+      times:
+        total: 1.2356793880462646
+        preprocessing: 0.6504411697387695
+        solving: 0.5125627517700195
+        updating: 0.06923961639404297
+        wall_clock: 3.529869794845581
+      memory:
+        ram:
+          max_mb: 1076.3984375
+          avg_mb: 520.2946428571429
+          min_mb: 2.0
+          samples: 7
+      solver_info:
+        n_iterations: 10
+        n_ranks: 2
+    - mesh_id: M3
+      nx: 60
+      ny: 60
+      nz: 30
+      total_cells: 108000
+      h: 3.3333333333333335
+      l2_error: 2.1243387178411578e-07
+      times:
+        total: 3.2790026664733887
+        preprocessing: 1.0795552730560303
+        solving: 1.9763689041137695
+        updating: 0.2171306610107422
+        wall_clock: 5.550459861755371
+      memory:
+        ram:
+          max_mb: 1486.375
+          avg_mb: 914.4442471590909
+          min_mb: 2.5
+          samples: 11
+      solver_info:
+        n_iterations: 11
+        n_ranks: 2
+  - name: example_3
+    description: Não-linear (ordem ~2)
+    results:
+    - mesh_id: M1
+      nx: 20
+      ny: 20
+      nz: 10
+      total_cells: 4000
+      h: 10.0
+      l2_error: 0.00037517885895017335
+      times:
+        total: 0.8420741558074951
+        preprocessing: 0.7470817565917969
+        solving: 0.06679558753967285
+        updating: 0.025679588317871094
+        wall_clock: 3.026624917984009
+      memory:
+        ram:
+          max_mb: 877.71875
+          avg_mb: 421.9895833333333
+          min_mb: 3.0
+          samples: 6
+      solver_info:
+        n_iterations: 10
+        n_ranks: 2
+    - mesh_id: M2
+      nx: 40
+      ny: 40
+      nz: 20
+      total_cells: 32000
+      h: 5.0
+      l2_error: 0.00012200057803002257
+      times:
+        total: 1.4140610694885254
+        preprocessing: 0.7956850528717041
+        solving: 0.5205464363098145
+        updating: 0.09416651725769043
+        wall_clock: 4.034184694290161
+      memory:
+        ram:
+          max_mb: 1076.48828125
+          avg_mb: 585.09326171875
+          min_mb: 2.5
+          samples: 8
+      solver_info:
+        n_iterations: 10
+        n_ranks: 2
+    - mesh_id: M3
+      nx: 60
+      ny: 60
+      nz: 30
+      total_cells: 108000
+      h: 3.3333333333333335
+      l2_error: 5.817756435310549e-05
+      times:
+        total: 3.592947006225586
+        preprocessing: 1.213200330734253
+        solving: 2.0705342292785645
+        updating: 0.3003854751586914
+        wall_clock: 6.051831483840942
+      memory:
+        ram:
+          max_mb: 1489.26171875
+          avg_mb: 942.8736979166666
+          min_mb: 2.5
+          samples: 12
+      solver_info:
+        n_iterations: 11
+        n_ranks: 2
+  - name: example_Li
+    description: Poço (ordem ~2)
+    results:
+    - mesh_id: M1
+      nx: 25
+      ny: 25
+      nz: 1
+      total_cells: 625
+      h: 80.0
+      l2_error: 0.025112511742606636
+      times:
+        total: 0.1860048770904541
+        preprocessing: 0.13190722465515137
+        solving: 0.022097110748291016
+        updating: 0.01907181739807129
+        wall_clock: 2.5207743644714355
+      memory:
+        ram:
+          max_mb: 801.94921875
+          avg_mb: 342.38984375
+          min_mb: 2.5
+          samples: 5
+      solver_info:
+        n_iterations: 12
+        n_ranks: 2
+    - mesh_id: M2
+      nx: 50
+      ny: 50
+      nz: 1
+      total_cells: 2500
+      h: 40.0
+      l2_error: 0.013078942463154296
+      times:
+        total: 0.25127649307250977
+        preprocessing: 0.14856815338134766
+        solving: 0.04550886154174805
+        updating: 0.026958703994750977
+        wall_clock: 2.5200140476226807
+      memory:
+        ram:
+          max_mb: 810.890625
+          avg_mb: 345.278125
+          min_mb: 2.5
+          samples: 5
+      solver_info:
+        n_iterations: 12
+        n_ranks: 2
+    - mesh_id: M3
+      nx: 100
+      ny: 100
+      nz: 1
+      total_cells: 10000
+      h: 20.0
+      l2_error: 0.007178341572510804
+      times:
+        total: 0.45675039291381836
+        preprocessing: 0.19463634490966797
+        solving: 0.12303733825683594
+        updating: 0.04164528846740723
+        wall_clock: 2.5205841064453125
+      memory:
+        ram:
+          max_mb: 920.98828125
+          avg_mb: 525.1953125
+          min_mb: 2.5
+          samples: 5
+      solver_info:
+        n_iterations: 12
+        n_ranks: 2

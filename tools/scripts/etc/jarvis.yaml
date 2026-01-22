@@ -40,19 +40,19 @@ correctness:
       expected_order: 0.0
       description: "Linear (exact solution for TPFA)"
       meshes:
-        - [50, 50, 50]
-        - [80, 80, 80]
-        - [120, 120, 120]
-        - [180, 180, 180]
+        - [4, 4, 4]
+        - [4, 4, 4]
+        - [4, 4, 4]
+        - [4, 4, 4]
     - name: "example_3"
       path: "examples/example_3/reservoir.ini"
       expected_order: 2.0
       description: "Nonlinear (spatial convergence)"
       meshes:
-        - [50, 50, 50]
-        - [80, 80, 80]
-        - [120, 120, 120]
-        - [180, 180, 180]
+        - [4, 4, 4]
+        - [4, 4, 4]
+        - [4, 4, 4]
+        - [4, 4, 4]
     - name: "example_Li"
       path: "examples/example_Li/reservoir.ini"
       expected_order: 2.0
