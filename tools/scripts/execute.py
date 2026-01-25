@@ -1611,7 +1611,7 @@ def main():
     
     
     if args.test == "all":
-        tests_to_run = ["solvers", "performance", "strong", "weak", "bandwidth"]
+        tests_to_run = ["performance", "strong", "weak"]
     else:
         tests_to_run = [args.test]
     
